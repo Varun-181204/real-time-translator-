@@ -1,0 +1,13 @@
+# Local Python environment
+venv/
+
+# Python cache and generated files
+__pycache__/
+*.py[cod]
+
+# Local environment/configuration
+.env
+
+# Temporary audio files created while translating
+*.wav
+*.mp3
