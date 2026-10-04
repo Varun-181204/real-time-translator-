@@ -21,6 +21,7 @@ const state = {
   microphoneStream: null,
   visualizerAnimId: null,
   dialogueSpeaker: 1,
+  dialogueCurrentText: '',
   continuousVoiceActive: false,
   historyFilter: 'all', // 'all', 'starred'
   historyItems: [],
@@ -36,6 +37,8 @@ const AVATAR_MAP = {
   robot: '🤖',
 };
 
+let voiceStateTimeout = null;
+
 // -------------------------------------------------------------
 // 1. Initialization
 // -------------------------------------------------------------
@@ -46,6 +49,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupSpeechRecognition();
   loadHistory();
   updateUIFromProfile();
+  setVoiceState('ready', 'Ready to speak');
 });
 
 function initLucide() {
@@ -77,15 +81,17 @@ async function fetchAppConfig() {
 function updateEngineBadge() {
   const badge = document.getElementById('engine-status-badge');
   const text = document.getElementById('engine-status-text');
+  if (!badge || !text) return;
+
   if (state.profile?.custom_api_key) {
     text.textContent = 'Custom Gemini Key';
-    badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-300 hover:bg-purple-500/20 transition-all text-xs font-medium cursor-pointer';
+    badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/25 text-purple-300 hover:bg-purple-500/20 transition-all text-xs font-medium cursor-pointer';
   } else if (state.config?.env_key_present) {
     text.textContent = 'Gemini 3.8 Active';
-    badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-all text-xs font-medium cursor-pointer';
+    badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 hover:bg-emerald-500/20 transition-all text-xs font-medium cursor-pointer';
   } else {
     text.textContent = 'Fallback Mode';
-    badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 hover:bg-amber-500/20 transition-all text-xs font-medium cursor-pointer';
+    badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-amber-400 hover:bg-amber-500/20 transition-all text-xs font-medium cursor-pointer';
   }
 }
 
@@ -100,7 +106,7 @@ function updateUIFromProfile() {
   if (navAvatar) navAvatar.textContent = emoji;
   if (navUsername) navUsername.textContent = state.profile.name || 'Voyager';
 
-  // Update default languages if not already touched
+  // Update default languages if not manually changed
   state.sourceLang = state.profile.native_language || 'auto';
   state.targetLang = state.profile.default_target || 'es';
   state.activeTone = state.profile.tone || 'natural';
@@ -113,14 +119,8 @@ function updateUIFromProfile() {
   // Highlight active tone
   highlightActiveTonePill();
 
-  // Auto-speak indicator
-  const autoSpeakInd = document.getElementById('auto-speak-indicator');
-  if (autoSpeakInd) {
-    autoSpeakInd.innerHTML = state.profile.auto_speak 
-      ? '<i data-lucide="volume-check" class="w-3.5 h-3.5 mr-1 text-emerald-400"></i> Auto-Speak On'
-      : '<i data-lucide="volume-x" class="w-3.5 h-3.5 mr-1 text-slate-500"></i> Auto-Speak Off';
-    initLucide();
-  }
+  // Sync auto-speak controls
+  updateAutoSpeakButtonsUI(Boolean(state.profile.auto_speak));
 }
 
 // -------------------------------------------------------------
@@ -156,7 +156,7 @@ function populateLanguageSelects() {
   populate(profNative, false);
   populate(profTarget, false);
 
-  if (tgtSelect) tgtSelect.value = 'es';
+  if (tgtSelect) tgtSelect.value = state.targetLang || 'es';
   if (dlg1) dlg1.value = 'en';
   if (dlg2) dlg2.value = 'es';
 }
@@ -170,9 +170,10 @@ function populateTonePills() {
   state.config.tones.forEach(t => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = `tone-pill px-2.5 py-1 rounded-lg text-xs font-medium border border-white/10 text-slate-300 hover:text-white hover:bg-white/10 ${t.id === state.activeTone ? 'active' : ''}`;
+    const isActive = t.id === state.activeTone;
+    btn.className = `tone-pill px-3 py-1.5 rounded-xl text-xs font-medium border border-white/10 text-slate-300 hover:text-white hover:bg-white/[0.08] ${isActive ? 'active' : ''}`;
     btn.setAttribute('data-tone-id', t.id);
-    btn.innerHTML = `<span>${t.name}</span>`;
+    btn.innerHTML = `<span class="flex items-center space-x-1"><span class="w-1.5 h-1.5 rounded-full ${isActive ? 'bg-purple-300' : 'bg-slate-600'} tone-dot mr-1.5"></span><span>${t.name}</span></span>`;
     btn.onclick = () => selectTone(t.id);
     container.appendChild(btn);
   });
@@ -202,10 +203,11 @@ function selectTone(toneId) {
 
 function highlightActiveTonePill() {
   document.querySelectorAll('.tone-pill').forEach(btn => {
-    if (btn.getAttribute('data-tone-id') === state.activeTone) {
-      btn.classList.add('active');
-    } else {
-      btn.classList.remove('active');
+    const isActive = btn.getAttribute('data-tone-id') === state.activeTone;
+    btn.classList.toggle('active', isActive);
+    const dot = btn.querySelector('.tone-dot');
+    if (dot) {
+      dot.className = `w-1.5 h-1.5 rounded-full ${isActive ? 'bg-purple-300' : 'bg-slate-600'} tone-dot mr-1.5`;
     }
   });
 }
@@ -217,10 +219,7 @@ function setupEventListeners() {
   const sourceInput = document.getElementById('source-input');
   if (sourceInput) {
     sourceInput.addEventListener('input', () => {
-      const len = sourceInput.value.length;
-      document.getElementById('source-char-count').textContent = `${len} chars`;
-      const clearBtn = document.getElementById('clear-input-btn');
-      if (clearBtn) clearBtn.classList.toggle('hidden', len === 0);
+      updateSourceCharAndWordCount();
     });
 
     // Keyboard shortcut: Ctrl + Enter to translate
@@ -239,12 +238,25 @@ function setupEventListeners() {
       e.preventDefault();
       swapLanguages();
     }
-    // Space when not typing in textarea: toggle microphone
+    // Space when not typing in textarea or input: toggle microphone
     if (e.code === 'Space' && document.activeElement.tagName !== 'TEXTAREA' && document.activeElement.tagName !== 'INPUT') {
       e.preventDefault();
       toggleMicrophone();
     }
   });
+}
+
+function updateSourceCharAndWordCount() {
+  const input = document.getElementById('source-input');
+  const text = input ? input.value : '';
+  const chars = text.length;
+  const words = text.trim() ? text.trim().split(/\s+/).filter(Boolean).length : 0;
+  const counter = document.getElementById('source-char-count');
+  if (counter) {
+    counter.textContent = `${words} word${words === 1 ? '' : 's'} • ${chars} char${chars === 1 ? '' : 's'}`;
+  }
+  const clearBtn = document.getElementById('clear-input-btn');
+  if (clearBtn) clearBtn.classList.toggle('hidden', chars === 0);
 }
 
 // -------------------------------------------------------------
@@ -290,8 +302,9 @@ async function triggerTranslation(customText = null, overrideTarget = null, over
   const model = state.profile?.model || 'gemini-3.8-flash';
   const customApiKey = state.profile?.custom_api_key || '';
 
-  // Show loading UI
+  // Show loading UI & update voice status
   setTranslationLoading(true);
+  setVoiceState('processing', 'Translating with Gemini AI...');
 
   try {
     const res = await fetch('/api/translate', {
@@ -324,10 +337,12 @@ async function triggerTranslation(customText = null, overrideTarget = null, over
       // Refresh history list
       loadHistory();
     } else {
+      setVoiceState('error', 'Translation failed');
       showToast(data.error || 'Translation failed', 'error');
     }
   } catch (err) {
     setTranslationLoading(false);
+    setVoiceState('error', 'Network error');
     console.error('Translation request error:', err);
     showToast('Network error during translation', 'error');
   }
@@ -354,24 +369,24 @@ function renderTranslationResult(data) {
   const starIcon = document.getElementById('star-icon');
 
   if (container) {
-    container.textContent = data.translated_text;
+    container.innerHTML = `<p class="select-text whitespace-pre-wrap">${escapeHtml(data.translated_text)}</p>`;
     container.classList.remove('opacity-40');
   }
 
   // Pronunciation
   if (data.pronunciation && data.pronunciation.trim()) {
-    pronText.textContent = data.pronunciation;
-    pronCard.classList.remove('hidden');
+    if (pronText) pronText.textContent = data.pronunciation;
+    pronCard?.classList.remove('hidden');
   } else {
-    pronCard.classList.add('hidden');
+    pronCard?.classList.add('hidden');
   }
 
   // Nuance
   if (data.nuance_note && data.nuance_note.trim()) {
-    nuanceText.textContent = data.nuance_note;
-    nuanceCard.classList.remove('hidden');
+    if (nuanceText) nuanceText.textContent = data.nuance_note;
+    nuanceCard?.classList.remove('hidden');
   } else {
-    nuanceCard.classList.add('hidden');
+    nuanceCard?.classList.add('hidden');
   }
 
   // Engine badge
@@ -391,41 +406,87 @@ function renderTranslationResult(data) {
     starIcon.classList.add('text-slate-400');
   }
 
+  setVoiceState('success', 'Translation ready');
   initLucide();
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 function clearSourceInput() {
   const input = document.getElementById('source-input');
   if (input) {
     input.value = '';
-    document.getElementById('source-char-count').textContent = '0 chars';
-    document.getElementById('clear-input-btn')?.classList.add('hidden');
+    updateSourceCharAndWordCount();
     document.getElementById('detected-lang-pill')?.classList.add('hidden');
     input.focus();
   }
+
+  // Reset target container to clean empty state
+  state.currentTranslation = null;
+  state.currentHistoryId = null;
+  const container = document.getElementById('target-text-container');
+  if (container) {
+    container.innerHTML = `
+      <div id="target-empty-state" class="h-full flex flex-col items-center justify-center text-center py-8 text-slate-500">
+        <div class="w-12 h-12 rounded-2xl bg-white/[0.03] border border-white/[0.08] flex items-center justify-center mb-3">
+          <i data-lucide="globe-2" class="w-6 h-6 text-purple-400/50"></i>
+        </div>
+        <p class="text-sm font-medium text-slate-400">Translations appear here in real time</p>
+        <p class="text-xs text-slate-500 mt-1">Type, click Speak, or upload an audio file</p>
+      </div>
+    `;
+    initLucide();
+  }
+  document.getElementById('pronunciation-card')?.classList.add('hidden');
+  document.getElementById('nuance-card')?.classList.add('hidden');
+  setVoiceState('ready', 'Ready to speak');
 }
 
 function swapLanguages() {
   const src = document.getElementById('source-lang-select');
   const tgt = document.getElementById('target-lang-select');
   const sourceInput = document.getElementById('source-input');
-  const targetContainer = document.getElementById('target-text-container');
+  const currentTranslationText = state.currentTranslation?.translated_text;
 
-  if (src.value === 'auto') {
-    // If auto, change source to previous target
-    src.value = tgt.value;
-    tgt.value = state.profile?.native_language || 'en';
+  const currentSrc = src.value;
+  const currentTgt = tgt.value;
+
+  if (currentSrc === 'auto') {
+    // If source is Auto Detect, safely swap using detected language if known
+    let targetCandidate = 'en';
+    const detected = state.currentTranslation?.detected_source_lang;
+    if (detected) {
+      const match = state.config?.languages?.find(l => 
+        l.code.toLowerCase() === detected.toLowerCase() || 
+        l.name.toLowerCase().includes(detected.toLowerCase())
+      );
+      if (match && match.code !== 'auto') {
+        targetCandidate = match.code;
+      }
+    } else {
+      targetCandidate = (currentTgt === 'en') ? 'es' : (state.profile?.native_language || 'en');
+    }
+
+    src.value = currentTgt;
+    tgt.value = targetCandidate;
   } else {
-    const temp = src.value;
-    src.value = tgt.value;
-    tgt.value = temp;
+    // Standard swap
+    src.value = currentTgt;
+    tgt.value = currentSrc;
   }
 
+  state.sourceLang = src.value;
+  state.targetLang = tgt.value;
+
   // Swap text if translation exists
-  if (state.currentTranslation && targetContainer && targetContainer.textContent.trim()) {
-    const prevTranslation = targetContainer.textContent.trim();
-    sourceInput.value = prevTranslation;
-    document.getElementById('source-char-count').textContent = `${prevTranslation.length} chars`;
+  if (currentTranslationText && sourceInput) {
+    sourceInput.value = currentTranslationText;
+    updateSourceCharAndWordCount();
+    document.getElementById('clear-input-btn')?.classList.remove('hidden');
     triggerTranslation();
   }
 }
@@ -442,8 +503,78 @@ function handleTargetLangChange() {
 }
 
 // -------------------------------------------------------------
-// 6. Speech Recognition & Web Audio Visualizer
+// 6. Voice Interaction States & Web Audio Visualizer
 // -------------------------------------------------------------
+function setVoiceState(status, message) {
+  const pill = document.getElementById('voice-state-pill');
+  const waveformBox = document.getElementById('mic-waveform-container');
+
+  if (!pill) return;
+
+  if (voiceStateTimeout) {
+    clearTimeout(voiceStateTimeout);
+    voiceStateTimeout = null;
+  }
+
+  pill.className = 'voice-state-badge';
+
+  switch (status) {
+    case 'listening':
+      pill.classList.add('voice-state-listening');
+      pill.innerHTML = `
+        <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+        <span id="voice-state-text">${message || 'Listening... Speak now'}</span>
+      `;
+      if (waveformBox) waveformBox.classList.remove('hidden');
+      break;
+
+    case 'processing':
+      pill.classList.add('voice-state-processing');
+      pill.innerHTML = `
+        <span class="w-3 h-3 rounded-full border-2 border-purple-400 border-t-transparent animate-spin inline-block"></span>
+        <span id="voice-state-text">${message || 'Processing speech...'}</span>
+      `;
+      if (waveformBox) waveformBox.classList.add('hidden');
+      break;
+
+    case 'success':
+      pill.classList.add('voice-state-success');
+      pill.innerHTML = `
+        <i data-lucide="check-circle" class="w-3.5 h-3.5 text-emerald-400"></i>
+        <span id="voice-state-text">${message || 'Translation ready'}</span>
+      `;
+      if (waveformBox) waveformBox.classList.add('hidden');
+      initLucide();
+      voiceStateTimeout = setTimeout(() => {
+        setVoiceState('ready', 'Ready to speak');
+      }, 3500);
+      break;
+
+    case 'error':
+      pill.classList.add('voice-state-error');
+      pill.innerHTML = `
+        <i data-lucide="alert-circle" class="w-3.5 h-3.5 text-rose-400"></i>
+        <span id="voice-state-text">${message || 'Microphone error'}</span>
+      `;
+      if (waveformBox) waveformBox.classList.add('hidden');
+      initLucide();
+      voiceStateTimeout = setTimeout(() => {
+        setVoiceState('ready', 'Ready to speak');
+      }, 4000);
+      break;
+
+    case 'ready':
+    default:
+      pill.classList.add('voice-state-ready');
+      pill.innerHTML = `
+        <span class="w-2 h-2 rounded-full bg-slate-400"></span>
+        <span id="voice-state-text">${message || 'Ready to speak'}</span>
+      `;
+      if (waveformBox) waveformBox.classList.add('hidden');
+      break;
+  }
+}
+
 function setupSpeechRecognition() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
@@ -458,6 +589,7 @@ function setupSpeechRecognition() {
   recognition.onstart = () => {
     state.isListening = true;
     updateMicButtonUI(true);
+    setVoiceState('listening', 'Listening... Speak now');
     startVisualizer();
   };
 
@@ -479,11 +611,9 @@ function setupSpeechRecognition() {
       const input = document.getElementById('source-input');
       if (input && currentText) {
         input.value = currentText;
-        document.getElementById('source-char-count').textContent = `${input.value.length} chars`;
-        document.getElementById('clear-input-btn')?.classList.remove('hidden');
+        updateSourceCharAndWordCount();
       }
     } else if (state.activeMode === 'dialogue') {
-      // In dialogue mode, we track current speaker utterance
       state.dialogueCurrentText = currentText;
     } else if (state.activeMode === 'voice') {
       const studioText = document.getElementById('studio-transcript');
@@ -493,6 +623,7 @@ function setupSpeechRecognition() {
 
   recognition.onerror = (event) => {
     console.warn('Speech recognition error:', event.error);
+    setVoiceState('error', event.error === 'no-speech' ? 'No speech detected' : 'Microphone error');
     stopMicrophone();
   };
 
@@ -503,11 +634,15 @@ function setupSpeechRecognition() {
 
     if (state.activeMode === 'translate') {
       const text = document.getElementById('source-input')?.value?.trim();
-      if (text) triggerTranslation();
+      if (text) {
+        setVoiceState('processing', 'Processing speech & translating...');
+        triggerTranslation();
+      } else {
+        setVoiceState('ready', 'Ready to speak');
+      }
     } else if (state.activeMode === 'dialogue') {
       handleDialogueUtteranceFinished();
     } else if (state.activeMode === 'voice' && state.continuousVoiceActive) {
-      // Re-start continuous listening if active
       setTimeout(() => {
         if (state.continuousVoiceActive) {
           try { recognition.start(); } catch(e){}
@@ -530,6 +665,7 @@ function toggleMicrophone() {
 function startMicrophone() {
   if (!state.recognition) {
     showToast('Microphone speech recognition not available in your browser.', 'error');
+    setVoiceState('error', 'Speech recognition unsupported');
     return;
   }
 
@@ -539,7 +675,6 @@ function startMicrophone() {
     langCode = state.profile?.native_language || 'en';
   }
   
-  // Find speech locale code
   const match = state.config?.languages?.find(l => l.code === langCode);
   state.recognition.lang = match?.speech_code || 'en-US';
 
@@ -563,20 +698,18 @@ function stopMicrophone() {
 
 function updateMicButtonUI(isRecording) {
   const btn = document.getElementById('mic-toggle-btn');
-  const icon = document.getElementById('mic-btn-icon');
   const text = document.getElementById('mic-btn-text');
-  const banner = document.getElementById('mic-visualizer-container');
 
   if (isRecording) {
-    btn?.classList.remove('bg-purple-600', 'hover:bg-purple-500');
-    btn?.classList.add('bg-rose-600', 'hover:bg-rose-500', 'animate-pulse');
+    if (btn) {
+      btn.className = 'px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center space-x-2 cursor-pointer bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/30 ring-2 ring-rose-400/50 animate-pulse';
+    }
     if (text) text.textContent = 'Listening...';
-    banner?.classList.remove('hidden');
   } else {
-    btn?.classList.remove('bg-rose-600', 'hover:bg-rose-500', 'animate-pulse');
-    btn?.classList.add('bg-purple-600', 'hover:bg-purple-500');
+    if (btn) {
+      btn.className = 'btn-primary-action px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center space-x-2 group cursor-pointer';
+    }
     if (text) text.textContent = 'Speak';
-    banner?.classList.add('hidden');
   }
 }
 
@@ -609,15 +742,32 @@ async function startVisualizer() {
       state.visualizerAnimId = requestAnimationFrame(draw);
       state.analyser.getByteFrequencyData(dataArray);
 
+      if (canvas.width !== canvas.clientWidth) canvas.width = canvas.clientWidth || 300;
+      if (canvas.height !== canvas.clientHeight) canvas.height = canvas.clientHeight || 28;
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const barWidth = (canvas.width / bufferLength) * 1.5;
+      const barCount = bufferLength;
+      const barWidth = (canvas.width / barCount) * 1.8;
       let x = 0;
 
-      for (let i = 0; i < bufferLength; i++) {
-        const barHeight = (dataArray[i] / 255) * canvas.height;
-        ctx.fillStyle = `rgb(${140 + barHeight * 2}, ${80 + barHeight}, 255)`;
-        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-        x += barWidth + 2;
+      for (let i = 0; i < barCount; i++) {
+        const barHeight = Math.max(3, (dataArray[i] / 255) * canvas.height);
+        const y = (canvas.height - barHeight) / 2;
+
+        const gradient = ctx.createLinearGradient(0, y, 0, y + barHeight);
+        gradient.addColorStop(0, '#c084fc');
+        gradient.addColorStop(1, '#6366f1');
+
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(x, y, Math.max(2, barWidth - 2), barHeight, 2);
+        } else {
+          ctx.rect(x, y, Math.max(2, barWidth - 2), barHeight);
+        }
+        ctx.fill();
+
+        x += barWidth + 1.5;
       }
     };
     draw();
@@ -638,7 +788,7 @@ function stopVisualizer() {
 }
 
 // -------------------------------------------------------------
-// 8. Text-to-Speech (TTS)
+// 8. Text-to-Speech (TTS) & Auto-Speak
 // -------------------------------------------------------------
 function speakTranslatedText() {
   const text = state.currentTranslation?.translated_text;
@@ -666,14 +816,12 @@ function speakText(text, langCode) {
     return;
   }
 
-  window.speechSynthesis.cancel(); // Cancel any ongoing speech
+  window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   
-  // Set rate & pitch from profile
   utterance.rate = state.profile?.speech_rate || 1.0;
   utterance.pitch = 1.0;
 
-  // Find matching voice if available
   const voices = window.speechSynthesis.getVoices();
   const simpleLang = langCode.split('-')[0].toLowerCase();
   const matchedVoice = voices.find(v => v.lang.toLowerCase().startsWith(simpleLang));
@@ -681,7 +829,6 @@ function speakText(text, langCode) {
     utterance.voice = matchedVoice;
   }
 
-  // Visual button feedback
   const icon = document.getElementById('speak-target-icon');
   if (icon) icon.classList.add('text-purple-400', 'animate-pulse');
 
@@ -710,6 +857,47 @@ function downloadTTSAudio() {
   }
   const lang = state.targetLang;
   window.open(`/api/tts?text=${encodeURIComponent(text)}&lang=${encodeURIComponent(lang)}`, '_blank');
+}
+
+async function toggleAutoSpeak() {
+  const current = Boolean(state.profile?.auto_speak);
+  const nextState = !current;
+  if (!state.profile) state.profile = {};
+  state.profile.auto_speak = nextState;
+
+  updateAutoSpeakButtonsUI(nextState);
+
+  try {
+    await fetch('/api/profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...state.profile, auto_speak: nextState })
+    });
+    showToast(nextState ? 'Auto-Speak enabled' : 'Auto-Speak disabled', 'info');
+  } catch (err) {
+    console.warn('Failed to persist auto-speak toggle:', err);
+  }
+}
+
+function updateAutoSpeakButtonsUI(isActive) {
+  const btn = document.getElementById('auto-speak-quick-btn');
+  const icon = document.getElementById('auto-speak-quick-icon');
+  const text = document.getElementById('auto-speak-quick-text');
+  const modalCheckbox = document.getElementById('profile-autospeak-toggle');
+
+  if (btn) {
+    btn.className = `auto-speak-btn ${isActive ? 'active' : 'inactive'} px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center space-x-1.5 cursor-pointer`;
+  }
+  if (icon) {
+    icon.setAttribute('data-lucide', isActive ? 'volume-check' : 'volume-x');
+  }
+  if (text) {
+    text.textContent = isActive ? 'Auto-Speak: On' : 'Auto-Speak: Off';
+  }
+  if (modalCheckbox) {
+    modalCheckbox.checked = isActive;
+  }
+  initLucide();
 }
 
 // -------------------------------------------------------------
@@ -747,7 +935,6 @@ async function handleDialogueUtteranceFinished() {
   const srcLang = speaker === 1 ? lang1 : lang2;
   const tgtLang = speaker === 1 ? lang2 : lang1;
 
-  // Append user message bubble
   appendDialogueBubble(speaker, text, 'translating...');
 
   try {
@@ -789,9 +976,9 @@ function appendDialogueBubble(speaker, originalText, translatedPlaceholder) {
       <div class="flex items-center space-x-2 mb-1 text-[11px] font-bold ${isSpeaker1 ? 'text-purple-300' : 'text-indigo-300'}">
         <span>${isSpeaker1 ? 'Speaker 1' : 'Speaker 2'}</span>
       </div>
-      <p class="text-xs text-slate-300 mb-1.5 opacity-90">${originalText}</p>
+      <p class="text-xs text-slate-300 mb-1.5 opacity-90">${escapeHtml(originalText)}</p>
       <div class="border-t border-white/10 pt-1.5">
-        <p class="text-sm font-semibold text-white dialogue-translated-text">${translatedPlaceholder}</p>
+        <p class="text-sm font-semibold text-white dialogue-translated-text">${escapeHtml(translatedPlaceholder)}</p>
       </div>
     </div>
   `;
@@ -811,9 +998,11 @@ function clearDialogueStream() {
   const stream = document.getElementById('dialogue-chat-stream');
   if (stream) {
     stream.innerHTML = `
-      <div class="text-center py-8 text-slate-500 text-xs">
-        <i data-lucide="mic-2" class="w-8 h-8 mx-auto text-purple-400/40 mb-2"></i>
-        <p>Chat cleared. Tap either speaker's microphone to start talking.</p>
+      <div class="text-center py-10 text-slate-500 text-xs">
+        <div class="w-12 h-12 rounded-2xl bg-white/[0.03] border border-white/[0.08] flex items-center justify-center mx-auto mb-3">
+          <i data-lucide="mic-2" class="w-6 h-6 text-purple-400/50"></i>
+        </div>
+        <p class="font-medium text-slate-400">Chat cleared. Tap either speaker's microphone to start talking.</p>
       </div>
     `;
     initLucide();
@@ -831,14 +1020,14 @@ function toggleContinuousVoice() {
   const statusPill = document.getElementById('studio-status-pill');
 
   if (state.continuousVoiceActive) {
-    btn.classList.add('bg-rose-600', 'hover:bg-rose-500');
+    btn.className = 'px-6 py-3 rounded-2xl text-sm font-bold flex items-center space-x-2 bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/30';
     label.textContent = 'Stop Listening';
     icon.setAttribute('data-lucide', 'square');
     statusPill.textContent = 'Listening Live';
     statusPill.className = 'text-rose-400 font-mono text-[11px] animate-pulse';
     startMicrophone();
   } else {
-    btn.classList.remove('bg-rose-600', 'hover:bg-rose-500');
+    btn.className = 'btn-primary-action px-6 py-3 rounded-2xl text-sm font-bold flex items-center space-x-2';
     label.textContent = 'Start Continuous Listening';
     icon.setAttribute('data-lucide', 'play');
     statusPill.textContent = 'Ready';
@@ -893,9 +1082,9 @@ function renderHistoryList(items) {
           </button>
         </div>
       </div>
-      <p class="text-slate-300 line-clamp-2 cursor-pointer" onclick="recallHistory(${item.id})">${item.source_text}</p>
-      <p class="font-semibold text-purple-300 line-clamp-2 cursor-pointer" onclick="recallHistory(${item.id})">${item.translated_text}</p>
-      ${item.pronunciation ? `<p class="text-[11px] font-mono text-purple-200/70 truncate">🔊 ${item.pronunciation}</p>` : ''}
+      <p class="text-slate-300 line-clamp-2 cursor-pointer" onclick="recallHistory(${item.id})">${escapeHtml(item.source_text)}</p>
+      <p class="font-semibold text-purple-300 line-clamp-2 cursor-pointer" onclick="recallHistory(${item.id})">${escapeHtml(item.translated_text)}</p>
+      ${item.pronunciation ? `<p class="text-[11px] font-mono text-purple-200/70 truncate">🔊 ${escapeHtml(item.pronunciation)}</p>` : ''}
     `;
     container.appendChild(card);
   });
@@ -911,7 +1100,10 @@ function recallHistory(id) {
   const srcSelect = document.getElementById('source-lang-select');
   const tgtSelect = document.getElementById('target-lang-select');
 
-  if (srcInput) srcInput.value = item.source_text;
+  if (srcInput) {
+    srcInput.value = item.source_text;
+    updateSourceCharAndWordCount();
+  }
   if (srcSelect) srcSelect.value = item.source_lang;
   if (tgtSelect) tgtSelect.value = item.target_lang;
 
@@ -925,7 +1117,6 @@ function recallHistory(id) {
   state.currentHistoryId = item.id;
   renderTranslationResult(state.currentTranslation);
 
-  // Close drawer
   toggleHistoryDrawer();
   showToast('Translation restored from history', 'info');
 }
@@ -1169,6 +1360,7 @@ async function handleAudioUpload(inputElem) {
   formData.append('lang', state.sourceLang === 'auto' ? 'en-US' : state.sourceLang);
 
   showToast(`Uploading ${file.name} for speech transcription...`, 'info');
+  setVoiceState('processing', 'Transcribing audio file...');
 
   try {
     const res = await fetch('/api/transcribe', {
@@ -1180,15 +1372,17 @@ async function handleAudioUpload(inputElem) {
       const srcInput = document.getElementById('source-input');
       if (srcInput) {
         srcInput.value = data.text;
-        document.getElementById('source-char-count').textContent = `${data.text.length} chars`;
+        updateSourceCharAndWordCount();
         document.getElementById('clear-input-btn')?.classList.remove('hidden');
       }
       showToast('Audio transcribed successfully!', 'success');
       triggerTranslation();
     } else {
+      setVoiceState('error', 'Transcription failed');
       showToast(data.error || 'Audio transcription failed', 'error');
     }
   } catch (err) {
+    setVoiceState('error', 'Audio upload failed');
     showToast('Failed to upload/transcribe audio', 'error');
   }
   inputElem.value = '';
@@ -1206,14 +1400,19 @@ function copyTranslation() {
   navigator.clipboard.writeText(text).then(() => {
     showToast('Copied translation to clipboard!', 'success');
     const copyIcon = document.getElementById('copy-icon');
+    const copyBtnText = document.getElementById('copy-btn-text');
     if (copyIcon) {
       copyIcon.setAttribute('data-lucide', 'check');
-      initLucide();
-      setTimeout(() => {
-        copyIcon.setAttribute('data-lucide', 'copy');
-        initLucide();
-      }, 2000);
     }
+    if (copyBtnText) {
+      copyBtnText.textContent = 'Copied!';
+    }
+    initLucide();
+    setTimeout(() => {
+      if (copyIcon) copyIcon.setAttribute('data-lucide', 'copy');
+      if (copyBtnText) copyBtnText.textContent = 'Copy';
+      initLucide();
+    }, 2000);
   });
 }
 
@@ -1229,9 +1428,7 @@ function showToast(message, type = 'info') {
   }[type] || 'bg-slate-900/90 border-slate-700 text-slate-200';
 
   toast.className = `p-3.5 rounded-2xl border backdrop-blur-xl shadow-2xl flex items-center space-x-2 text-xs font-medium toast-enter pointer-events-auto ${bgStyles}`;
-  toast.innerHTML = `
-    <span>${message}</span>
-  `;
+  toast.innerHTML = `<span>${message}</span>`;
 
   container.appendChild(toast);
   setTimeout(() => {

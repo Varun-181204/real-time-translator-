@@ -163,7 +163,7 @@ def translate_fallback(text: str, target_lang: str, source_lang: str = "auto", e
 def text_to_speech_mp3(text: str, lang: str = "en") -> Optional[bytes]:
     """Converts text to MP3 bytes using gTTS."""
     try:
-        from gTTS import gTTS
+        from gtts import gTTS
         # Clean lang code (e.g. en-US -> en)
         simple_lang = lang.split("-")[0] if "-" in lang else lang
         tts = gTTS(text=text, lang=simple_lang)
