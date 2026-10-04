@@ -1,0 +1,123 @@
+/* Custom Glassmorphism and Modern UI Aesthetics */
+
+:root {
+  --primary-glow: radial-gradient(rgba(124, 58, 237, 0.25), rgba(76, 29, 149, 0));
+  --card-border: rgba(255, 255, 255, 0.08);
+  --card-bg: rgba(18, 18, 34, 0.65);
+}
+
+body {
+  background-color: #0b0b14;
+  overflow-x: hidden;
+}
+
+/* Glassmorphic Panels */
+.glass-panel {
+  background: var(--card-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--card-border);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+.glass-card {
+  background: rgba(22, 22, 42, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--card-border);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+}
+
+/* Mode Switcher Tabs */
+.mode-tab.active {
+  background: rgba(124, 58, 237, 0.25);
+  color: #d8b4fe;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  box-shadow: 0 0 15px rgba(168, 85, 247, 0.2);
+}
+
+/* Tone Pills */
+.tone-pill {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tone-pill.active {
+  background: rgba(139, 92, 246, 0.25);
+  color: #f3e8ff;
+  border-color: rgba(168, 85, 247, 0.45);
+  box-shadow: 0 0 12px rgba(147, 51, 234, 0.25);
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(147, 51, 234, 0.4);
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Pulse Glow Keyframes */
+@keyframes soft-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+}
+
+.animate-soft-pulse {
+  animation: soft-pulse 2s infinite ease-in-out;
+}
+
+/* Dialogue Chat Bubbles */
+.chat-bubble-speaker1 {
+  background: linear-gradient(135deg, rgba(88, 28, 135, 0.4), rgba(59, 7, 100, 0.4));
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  border-radius: 1.25rem 1.25rem 0.25rem 1.25rem;
+}
+
+.chat-bubble-speaker2 {
+  background: linear-gradient(135deg, rgba(30, 58, 138, 0.4), rgba(23, 37, 84, 0.4));
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 1.25rem 1.25rem 1.25rem 0.25rem;
+}
+
+/* Toast Animations */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.toast-enter {
+  animation: slide-in-right 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

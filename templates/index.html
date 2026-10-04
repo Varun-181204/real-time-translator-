@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OmniTranslate AI - Real-Time Multilingual Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            cosmic: {
+              50: '#f5f3ff',
+              100: '#ede9fe',
+              200: '#ddd6fe',
+              500: '#8b5cf6',
+              600: '#7c3aed',
+              700: '#6d28d9',
+              800: '#5b21b6',
+              900: '#4c1d95',
+              950: '#0b081b',
+            }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-[#0b0b14] text-slate-100 min-h-screen flex flex-col font-sans selection:bg-purple-500 selection:text-white">
+  
+  <!-- Ambient background glow elements -->
+  <div class="fixed inset-0 pointer-events-none overflow-hidden z-0">
+    <div class="absolute -top-40 -left-40 w-96 h-96 bg-purple-600/15 rounded-full blur-3xl"></div>
+    <div class="absolute top-1/3 -right-40 w-96 h-96 bg-blue-600/15 rounded-full blur-3xl"></div>
+    <div class="absolute -bottom-40 left-1/3 w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl"></div>
+  </div>
+
+  <!-- Header & Navigation -->
+  <header class="relative z-20 border-b border-white/10 bg-black/30 backdrop-blur-xl sticky top-0">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      
+      <!-- Brand Logo -->
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-purple-500/25 ring-1 ring-white/20">
+          <i data-lucide="languages" class="w-5 h-5 text-white"></i>
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <h1 class="text-lg font-bold tracking-tight bg-gradient-to-r from-white via-slate-200 to-purple-300 bg-clip-text text-transparent">
+              OmniTranslate <span class="text-xs px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-semibold border border-purple-500/30">AI</span>
+            </h1>
+          </div>
+          <p class="text-xs text-slate-400 font-medium hidden sm:block">Real-Time Speech & Text Translation</p>
+        </div>
+      </div>
+
+      <!-- Center: Mode Selector -->
+      <nav class="hidden md:flex items-center p-1 bg-white/5 border border-white/10 rounded-xl backdrop-blur-md">
+        <button id="nav-mode-translate" onclick="switchMode('translate')" class="mode-tab active px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-2 transition-all">
+          <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+          <span>Translate</span>
+        </button>
+        <button id="nav-mode-dialogue" onclick="switchMode('dialogue')" class="mode-tab px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-2 transition-all text-slate-400 hover:text-slate-200">
+          <i data-lucide="messages-square" class="w-3.5 h-3.5"></i>
+          <span>Conversation</span>
+        </button>
+        <button id="nav-mode-voice" onclick="switchMode('voice')" class="mode-tab px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-2 transition-all text-slate-400 hover:text-slate-200">
+          <i data-lucide="mic" class="w-3.5 h-3.5"></i>
+          <span>Voice Studio</span>
+        </button>
+      </nav>
+
+      <!-- Right: Engine Status, History, Profile -->
+      <div class="flex items-center space-x-2 sm:space-x-3">
+        
+        <!-- API Engine Status Badge -->
+        <button onclick="openProfileModal('api-section')" id="engine-status-badge" class="flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-all text-xs font-medium cursor-pointer">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span id="engine-status-text" class="hidden sm:inline">Gemini Connected</span>
+        </button>
+
+        <!-- History Drawer Button -->
+        <button onclick="toggleHistoryDrawer()" class="p-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white transition-all relative" title="Translation History">
+          <i data-lucide="history" class="w-4 h-4"></i>
+        </button>
+
+        <!-- Profile & Settings Button -->
+        <button onclick="openProfileModal()" class="flex items-center space-x-2 p-1 pl-2 pr-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white transition-all" title="User Profile & Settings">
+          <div id="nav-avatar" class="w-7 h-7 rounded-lg bg-gradient-to-tr from-purple-500 to-indigo-600 flex items-center justify-center text-sm shadow-inner font-bold text-white">
+            🚀
+          </div>
+          <span id="nav-username" class="text-xs font-semibold max-w-[80px] sm:max-w-[110px] truncate hidden sm:inline">Voyager</span>
+          <i data-lucide="settings" class="w-3.5 h-3.5 text-slate-400"></i>
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="relative z-10 flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col">
+    
+    <!-- ========================================== -->
+    <!-- VIEW 1: TRANSLATE WORKSPACE               -->
+    <!-- ========================================== -->
+    <div id="view-translate" class="flex-1 flex flex-col space-y-4">
+      
+      <!-- Top Bar: Languages & Tone Controls -->
+      <div class="glass-panel p-3 rounded-2xl flex flex-wrap items-center justify-between gap-3">
+        
+        <!-- Language Selectors -->
+        <div class="flex items-center flex-wrap sm:flex-nowrap gap-2 w-full md:w-auto">
+          
+          <!-- Source Language -->
+          <div class="relative flex-1 sm:w-48">
+            <select id="source-lang-select" onchange="handleSourceLangChange()" class="w-full bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl px-3 py-2 text-xs sm:text-sm font-semibold text-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all appearance-none cursor-pointer">
+              <!-- Dynamically populated -->
+            </select>
+            <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+              <i data-lucide="chevron-down" class="w-4 h-4"></i>
+            </div>
+          </div>
+
+          <!-- Swap Button -->
+          <button onclick="swapLanguages()" id="swap-lang-btn" class="p-2.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 hover:text-white transition-all transform hover:rotate-180 duration-300" title="Swap Languages (Ctrl+S)">
+            <i data-lucide="arrow-left-right" class="w-4 h-4"></i>
+          </button>
+
+          <!-- Target Language -->
+          <div class="relative flex-1 sm:w-48">
+            <select id="target-lang-select" onchange="handleTargetLangChange()" class="w-full bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl px-3 py-2 text-xs sm:text-sm font-semibold text-slate-200 focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all appearance-none cursor-pointer">
+              <!-- Dynamically populated -->
+            </select>
+            <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
+              <i data-lucide="chevron-down" class="w-4 h-4"></i>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tone / Persona Selector -->
+        <div class="flex items-center space-x-1.5 overflow-x-auto pb-1 sm:pb-0 w-full md:w-auto scrollbar-none">
+          <span class="text-xs text-slate-400 font-medium mr-1 flex items-center">
+            <i data-lucide="sliders" class="w-3.5 h-3.5 mr-1 text-purple-400"></i> Tone:
+          </span>
+          <div id="tone-pills-container" class="flex items-center space-x-1.5">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Dual Translation Cards -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
+        
+        <!-- Source Card (Input) -->
+        <div class="glass-card rounded-2xl flex flex-col relative overflow-hidden transition-all duration-300 border border-white/10 hover:border-purple-500/30">
+          
+          <!-- Card Header -->
+          <div class="px-4 py-2.5 border-b border-white/5 flex items-center justify-between text-xs text-slate-400">
+            <div class="flex items-center space-x-2">
+              <span id="source-card-badge" class="font-semibold text-slate-300">Source Input</span>
+              <span id="detected-lang-pill" class="hidden px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-mono text-[10px] border border-purple-500/30">Detected: English</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <span id="source-char-count" class="font-mono text-[11px] text-slate-500">0 chars</span>
+              <button onclick="clearSourceInput()" id="clear-input-btn" class="hover:text-rose-400 transition-colors hidden" title="Clear text">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- Textarea Input -->
+          <div class="p-4 flex-1 flex flex-col">
+            <textarea id="source-input" placeholder="Type or click the microphone to speak in real time..." class="w-full flex-1 bg-transparent resize-none text-slate-100 placeholder-slate-500 focus:outline-none text-base sm:text-lg leading-relaxed font-sans" rows="6"></textarea>
+          </div>
+
+          <!-- Real-Time Voice Visualizer Banner (Appears when listening) -->
+          <div id="mic-visualizer-container" class="hidden px-4 py-2 bg-purple-950/40 border-t border-purple-500/20 flex items-center space-x-3">
+            <span class="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span>
+            <span id="mic-status-label" class="text-xs font-semibold text-purple-300 animate-pulse">Listening live... speak now</span>
+            <div class="flex-1 flex items-center justify-center h-6 overflow-hidden">
+              <canvas id="mic-waveform" class="w-full h-full"></canvas>
+            </div>
+          </div>
+
+          <!-- Card Bottom Toolbar -->
+          <div class="px-4 py-3 border-t border-white/5 bg-white/[0.02] flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              
+              <!-- Microphone Button -->
+              <button id="mic-toggle-btn" onclick="toggleMicrophone()" class="p-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-600/30 transition-all flex items-center space-x-2 group" title="Toggle Real-Time Speech (Space)">
+                <i data-lucide="mic" id="mic-btn-icon" class="w-4 h-4"></i>
+                <span id="mic-btn-text" class="text-xs font-semibold hidden sm:inline">Speak</span>
+              </button>
+
+              <!-- Upload Audio File -->
+              <label class="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white transition-all cursor-pointer flex items-center space-x-1.5" title="Upload audio file (WAV, MP3, etc.)">
+                <i data-lucide="file-audio" class="w-4 h-4"></i>
+                <input type="file" id="audio-file-input" accept="audio/*" class="hidden" onchange="handleAudioUpload(this)">
+              </label>
+
+              <!-- Listen to Source (TTS) -->
+              <button onclick="speakSourceText()" class="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white transition-all" title="Listen to original text">
+                <i data-lucide="volume-2" class="w-4 h-4"></i>
+              </button>
+
+            </div>
+
+            <!-- Translate Action Button -->
+            <div class="flex items-center space-x-2">
+              <button onclick="triggerTranslation()" id="translate-action-btn" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-500 hover:from-purple-500 hover:to-indigo-500 text-white font-semibold text-xs sm:text-sm shadow-lg shadow-purple-600/30 flex items-center space-x-2 transition-all transform active:scale-95">
+                <i data-lucide="sparkles" id="translate-btn-icon" class="w-4 h-4"></i>
+                <span id="translate-btn-text">Translate</span>
+                <span class="text-[10px] opacity-60 hidden lg:inline font-mono">Ctrl+Enter</span>
+              </button>
+            </div>
+
+          </div>
+
+        </div>
+
+        <!-- Target Card (Translation Result) -->
+        <div class="glass-card rounded-2xl flex flex-col relative overflow-hidden transition-all duration-300 border border-white/10 hover:border-indigo-500/30 bg-gradient-to-b from-white/[0.03] to-transparent">
+          
+          <!-- Card Header -->
+          <div class="px-4 py-2.5 border-b border-white/5 flex items-center justify-between text-xs text-slate-400">
+            <div class="flex items-center space-x-2">
+              <span id="target-card-badge" class="font-semibold text-slate-300">Translation</span>
+              <span id="engine-used-pill" class="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-mono text-[10px] border border-emerald-500/20">Gemini 3.8 Flash</span>
+            </div>
+            <div class="flex items-center space-x-2">
+              <button onclick="toggleStarCurrent()" id="star-current-btn" class="p-1 rounded-lg text-slate-400 hover:text-amber-400 transition-colors" title="Save to Favorites">
+                <i data-lucide="star" id="star-icon" class="w-4 h-4"></i>
+              </button>
+            </div>
+          </div>
+
+          <!-- Translation Output Area -->
+          <div class="p-4 flex-1 flex flex-col justify-between">
+            
+            <div class="space-y-3">
+              <!-- Translated Text -->
+              <div id="target-text-container" class="text-slate-100 text-base sm:text-lg leading-relaxed font-sans min-h-[90px] select-text">
+                <span class="text-slate-500 italic">Translation will appear here in real time...</span>
+              </div>
+
+              <!-- Phonetic Pronunciation / Romanization Guide -->
+              <div id="pronunciation-card" class="hidden p-2.5 rounded-xl bg-white/[0.03] border border-white/10 flex items-start space-x-2.5">
+                <div class="p-1 rounded-md bg-purple-500/20 text-purple-300 mt-0.5">
+                  <i data-lucide="music" class="w-3.5 h-3.5"></i>
+                </div>
+                <div class="flex-1">
+                  <span class="text-[10px] uppercase tracking-wider text-slate-400 font-bold block">Pronunciation / Romanization</span>
+                  <p id="pronunciation-text" class="text-xs sm:text-sm font-mono text-purple-200 mt-0.5 select-all"></p>
+                </div>
+              </div>
+
+              <!-- Cultural Context & Nuance Notes -->
+              <div id="nuance-card" class="hidden p-2.5 rounded-xl bg-indigo-950/30 border border-indigo-500/20 flex items-start space-x-2.5">
+                <div class="p-1 rounded-md bg-indigo-500/20 text-indigo-300 mt-0.5">
+                  <i data-lucide="info" class="w-3.5 h-3.5"></i>
+                </div>
+                <div class="flex-1">
+                  <span class="text-[10px] uppercase tracking-wider text-indigo-300 font-bold block">Linguistic & Cultural Context</span>
+                  <p id="nuance-text" class="text-xs text-slate-300 mt-0.5"></p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Loading Skeleton -->
+            <div id="translation-loader" class="hidden py-6 flex flex-col items-center justify-center space-y-2">
+              <div class="w-8 h-8 rounded-full border-2 border-purple-500 border-t-transparent animate-spin"></div>
+              <span class="text-xs text-purple-300 font-medium">Interpreting with Gemini...</span>
+            </div>
+
+          </div>
+
+          <!-- Card Bottom Toolbar -->
+          <div class="px-4 py-3 border-t border-white/5 bg-white/[0.02] flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              
+              <!-- Listen Translation (TTS) -->
+              <button onclick="speakTranslatedText()" id="speak-target-btn" class="p-2.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 hover:text-white transition-all flex items-center space-x-1.5" title="Listen aloud">
+                <i data-lucide="volume-2" id="speak-target-icon" class="w-4 h-4"></i>
+                <span class="text-xs font-semibold hidden sm:inline">Listen</span>
+              </button>
+
+              <!-- Copy Button -->
+              <button onclick="copyTranslation()" id="copy-btn" class="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white transition-all flex items-center space-x-1.5" title="Copy to clipboard">
+                <i data-lucide="copy" id="copy-icon" class="w-4 h-4"></i>
+                <span class="text-xs font-semibold hidden sm:inline">Copy</span>
+              </button>
+
+              <!-- Download Audio MP3 -->
+              <button onclick="downloadTTSAudio()" id="download-audio-btn" class="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white transition-all" title="Download Audio (MP3)">
+                <i data-lucide="download" class="w-4 h-4"></i>
+              </button>
+
+            </div>
+
+            <div class="text-[11px] text-slate-400 font-mono flex items-center space-x-2">
+              <span id="auto-speak-indicator" class="flex items-center text-slate-500">
+                <i data-lucide="volume-check" class="w-3.5 h-3.5 mr-1"></i> Auto-Speak On
+              </span>
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- ========================================== -->
+    <!-- VIEW 2: CONVERSATION / DIALOGUE MODE       -->
+    <!-- ========================================== -->
+    <div id="view-dialogue" class="hidden flex-1 flex flex-col space-y-4">
+      
+      <!-- Dialogue Header Bar -->
+      <div class="glass-panel p-3 rounded-2xl flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+          <div class="p-2 rounded-xl bg-purple-600/20 border border-purple-500/30 text-purple-300">
+            <i data-lucide="messages-square" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h2 class="text-sm font-bold text-slate-200">Two-Way Conversation Mode</h2>
+            <p class="text-xs text-slate-400">Real-time bilingual dialogue between two speakers</p>
+          </div>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="clearDialogueStream()" class="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-slate-300 hover:text-white transition-all flex items-center space-x-1.5">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+            <span>Clear Chat</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Dialogue Stream Area -->
+      <div id="dialogue-chat-stream" class="flex-1 glass-card rounded-2xl p-4 overflow-y-auto space-y-3 min-h-[360px] max-h-[500px]">
+        <!-- Welcome Bubble -->
+        <div class="text-center py-8 text-slate-500 text-xs">
+          <i data-lucide="mic-2" class="w-8 h-8 mx-auto text-purple-400/40 mb-2"></i>
+          <p>Tap either speaker's microphone below to speak. Translations will appear in alternating chat bubbles.</p>
+        </div>
+      </div>
+
+      <!-- Two Speakers Bottom Controls -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        
+        <!-- Speaker 1 (Left) -->
+        <div class="glass-panel p-4 rounded-2xl border border-purple-500/30 flex items-center justify-between bg-purple-950/10">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-purple-600/30 flex items-center justify-center font-bold text-purple-300 text-base border border-purple-500/30">
+              A
+            </div>
+            <div>
+              <span class="text-xs font-bold text-purple-300 block">Speaker 1</span>
+              <select id="dialogue-lang-1" class="bg-transparent text-xs font-semibold text-slate-300 focus:outline-none cursor-pointer">
+                <!-- Dynamically populated -->
+              </select>
+            </div>
+          </div>
+          <button onclick="startDialogueSpeaker(1)" id="dialogue-mic-1" class="p-3.5 rounded-2xl bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-600/30 transition-all flex items-center space-x-2">
+            <i data-lucide="mic" class="w-5 h-5"></i>
+            <span class="text-xs font-bold">Speak</span>
+          </button>
+        </div>
+
+        <!-- Speaker 2 (Right) -->
+        <div class="glass-panel p-4 rounded-2xl border border-indigo-500/30 flex items-center justify-between bg-indigo-950/10">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-indigo-600/30 flex items-center justify-center font-bold text-indigo-300 text-base border border-indigo-500/30">
+              B
+            </div>
+            <div>
+              <span class="text-xs font-bold text-indigo-300 block">Speaker 2</span>
+              <select id="dialogue-lang-2" class="bg-transparent text-xs font-semibold text-slate-300 focus:outline-none cursor-pointer">
+                <!-- Dynamically populated -->
+              </select>
+            </div>
+          </div>
+          <button onclick="startDialogueSpeaker(2)" id="dialogue-mic-2" class="p-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/30 transition-all flex items-center space-x-2">
+            <i data-lucide="mic" class="w-5 h-5"></i>
+            <span class="text-xs font-bold">Speak</span>
+          </button>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- ========================================== -->
+    <!-- VIEW 3: VOICE STUDIO                       -->
+    <!-- ========================================== -->
+    <div id="view-voice" class="hidden flex-1 flex flex-col space-y-4">
+      
+      <div class="glass-panel p-6 rounded-2xl flex-1 flex flex-col items-center justify-center text-center relative overflow-hidden">
+        
+        <!-- Large Glowing Visualizer Orb -->
+        <div class="relative mb-6">
+          <div id="voice-studio-pulse" class="w-36 h-36 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-500 opacity-20 blur-xl absolute inset-0 animate-ping"></div>
+          <div class="w-36 h-36 rounded-full bg-gradient-to-tr from-purple-600/30 to-indigo-600/30 border border-purple-500/40 backdrop-blur-xl flex items-center justify-center shadow-2xl relative z-10">
+            <i data-lucide="mic" id="voice-studio-icon" class="w-14 h-14 text-purple-300"></i>
+          </div>
+        </div>
+
+        <h2 class="text-xl font-bold text-white mb-2">Hands-Free Live Voice Interpreter</h2>
+        <p class="text-xs sm:text-sm text-slate-400 max-w-md mb-6">
+          Speak naturally into your microphone. OmniTranslate AI will continuously capture your voice, detect language, translate, and speak the answer back immediately.
+        </p>
+
+        <!-- Studio Control Buttons -->
+        <div class="flex items-center space-x-4 mb-8">
+          <button onclick="toggleContinuousVoice()" id="continuous-voice-btn" class="px-6 py-3 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-sm shadow-xl shadow-purple-600/30 flex items-center space-x-2 transition-all">
+            <i data-lucide="play" id="cont-voice-icon" class="w-4 h-4"></i>
+            <span id="cont-voice-label">Start Continuous Listening</span>
+          </button>
+        </div>
+
+        <!-- Live Subtitles Card -->
+        <div class="w-full max-w-2xl glass-card p-4 rounded-2xl text-left border border-white/10">
+          <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+            <span class="font-bold text-purple-300 uppercase tracking-wider text-[10px]">Live Audio Transcript</span>
+            <span id="studio-status-pill" class="text-emerald-400 font-mono text-[11px]">Ready</span>
+          </div>
+          <div id="studio-transcript" class="min-h-[60px] text-slate-200 text-sm font-sans">
+            Say something to see live speech translation here...
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- ========================================== -->
+  <!-- SLIDE-OVER: HISTORY & SAVED TRANSLATIONS   -->
+  <!-- ========================================== -->
+  <div id="history-backdrop" onclick="toggleHistoryDrawer()" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 hidden transition-opacity"></div>
+  <aside id="history-drawer" class="fixed top-0 right-0 bottom-0 w-full sm:w-96 bg-[#10101c]/95 backdrop-blur-2xl border-l border-white/10 z-50 transform translate-x-full transition-transform duration-300 ease-in-out flex flex-col shadow-2xl">
+    
+    <!-- Drawer Header -->
+    <div class="p-4 border-b border-white/10 flex items-center justify-between">
+      <div class="flex items-center space-x-2">
+        <i data-lucide="history" class="w-5 h-5 text-purple-400"></i>
+        <h3 class="text-sm font-bold text-white">Translation History</h3>
+      </div>
+      <button onclick="toggleHistoryDrawer()" class="p-1 rounded-lg text-slate-400 hover:text-white">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+
+    <!-- Filter & Search Toolbar -->
+    <div class="p-3 border-b border-white/5 space-y-2">
+      <!-- Search -->
+      <div class="relative">
+        <input type="text" id="history-search-input" oninput="filterHistory()" placeholder="Search past translations..." class="w-full bg-white/5 border border-white/10 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-purple-500">
+        <i data-lucide="search" class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"></i>
+      </div>
+      <!-- Tabs -->
+      <div class="flex items-center justify-between text-xs">
+        <div class="flex items-center space-x-1">
+          <button id="hist-tab-all" onclick="setHistoryFilter('all')" class="px-2.5 py-1 rounded-lg bg-purple-600/30 text-purple-300 font-semibold">All</button>
+          <button id="hist-tab-starred" onclick="setHistoryFilter('starred')" class="px-2.5 py-1 rounded-lg bg-white/5 text-slate-400 hover:text-white">Starred ⭐</button>
+        </div>
+        <div class="flex items-center space-x-1.5">
+          <button onclick="exportHistoryData('json')" class="p-1 rounded hover:text-purple-300 text-slate-400" title="Export JSON">
+            <i data-lucide="file-json" class="w-3.5 h-3.5"></i>
+          </button>
+          <button onclick="exportHistoryData('csv')" class="p-1 rounded hover:text-purple-300 text-slate-400" title="Export CSV">
+            <i data-lucide="file-spreadsheet" class="w-3.5 h-3.5"></i>
+          </button>
+          <button onclick="clearHistoryConfirm()" class="p-1 rounded hover:text-rose-400 text-slate-400" title="Clear History">
+            <i data-lucide="trash" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- History Items List -->
+    <div id="history-items-list" class="flex-1 overflow-y-auto p-3 space-y-2.5">
+      <!-- Populated dynamically -->
+    </div>
+
+  </aside>
+
+  <!-- ========================================== -->
+  <!-- MODAL: USER PROFILE & SETTINGS             -->
+  <!-- ========================================== -->
+  <div id="profile-modal-backdrop" class="fixed inset-0 bg-black/70 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
+    <div class="glass-card w-full max-w-lg rounded-3xl border border-white/10 bg-[#121222] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
+      
+      <!-- Modal Header -->
+      <div class="p-5 border-b border-white/10 flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+          <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white">
+            <i data-lucide="user-check" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white">Profile & Preferences</h3>
+            <p class="text-xs text-slate-400">Personalize your translation experience & API keys</p>
+          </div>
+        </div>
+        <button onclick="closeProfileModal()" class="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-all">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Modal Body (Scrollable) -->
+      <div class="p-6 overflow-y-auto space-y-6 flex-1 text-xs sm:text-sm">
+        
+        <!-- Profile Identity & Avatar -->
+        <div class="space-y-3">
+          <label class="text-xs font-bold uppercase tracking-wider text-purple-400 block">Personal Profile</label>
+          <div class="flex items-center space-x-4">
+            <!-- Selected Avatar Preview -->
+            <div id="profile-avatar-preview" class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-2xl shadow-lg ring-2 ring-purple-500/40">
+              🚀
+            </div>
+            <div class="flex-1 space-y-2">
+              <input type="text" id="profile-name-input" placeholder="Your Name or Persona" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500">
+              <!-- Preset Avatar Emojis -->
+              <div class="flex items-center space-x-2" id="avatar-presets">
+                <button type="button" onclick="selectAvatar('astronaut', '🚀')" class="p-1.5 rounded-lg bg-white/5 hover:bg-purple-600/30 border border-white/10">🚀</button>
+                <button type="button" onclick="selectAvatar('wizard', '🧙‍♂️')" class="p-1.5 rounded-lg bg-white/5 hover:bg-purple-600/30 border border-white/10">🧙‍♂️</button>
+                <button type="button" onclick="selectAvatar('detective', '🕵️')" class="p-1.5 rounded-lg bg-white/5 hover:bg-purple-600/30 border border-white/10">🕵️</button>
+                <button type="button" onclick="selectAvatar('traveler', '🌍')" class="p-1.5 rounded-lg bg-white/5 hover:bg-purple-600/30 border border-white/10">🌍</button>
+                <button type="button" onclick="selectAvatar('sparkle', '✨')" class="p-1.5 rounded-lg bg-white/5 hover:bg-purple-600/30 border border-white/10">✨</button>
+                <button type="button" onclick="selectAvatar('robot', '🤖')" class="p-1.5 rounded-lg bg-white/5 hover:bg-purple-600/30 border border-white/10">🤖</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Default Languages & Tone -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="space-y-1.5">
+            <label class="text-xs font-semibold text-slate-300">Native / Home Language</label>
+            <select id="profile-native-lang" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-slate-200 text-xs focus:ring-2 focus:ring-purple-500">
+              <!-- Populated -->
+            </select>
+          </div>
+          <div class="space-y-1.5">
+            <label class="text-xs font-semibold text-slate-300">Default Target Language</label>
+            <select id="profile-target-lang" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-slate-200 text-xs focus:ring-2 focus:ring-purple-500">
+              <!-- Populated -->
+            </select>
+          </div>
+        </div>
+
+        <!-- Preferred Persona / Tone -->
+        <div class="space-y-1.5">
+          <label class="text-xs font-semibold text-slate-300">Preferred Translation Tone</label>
+          <select id="profile-tone-select" class="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-slate-200 text-xs focus:ring-2 focus:ring-purple-500">
+            <!-- Populated -->
+          </select>
+        </div>
+
+        <!-- API Key & Engine Section -->
+        <div id="profile-api-section" class="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-3">
+          <div class="flex items-center justify-between">
+            <label class="text-xs font-bold uppercase tracking-wider text-purple-400 flex items-center">
+              <i data-lucide="key" class="w-3.5 h-3.5 mr-1.5"></i> Google Gemini API Key
+            </label>
+            <span id="profile-key-status" class="text-[11px] font-mono px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300">System Key Active</span>
+          </div>
+          
+          <div class="space-y-2">
+            <div class="relative">
+              <input type="password" id="profile-api-key-input" placeholder="AIzaSy... (leave blank to use system key)" class="w-full bg-white/5 border border-white/10 rounded-xl px-3.5 py-2 text-xs font-mono text-white placeholder-slate-500 focus:ring-2 focus:ring-purple-500 pr-10">
+              <button type="button" onclick="toggleKeyVisibility()" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
+                <i data-lucide="eye" id="key-vis-icon" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+            
+            <div class="flex items-center justify-between">
+              <p class="text-[11px] text-slate-400">
+                Powers Gemini 3.8 Flash real-time translations, transliterations & cultural notes.
+              </p>
+              <button type="button" onclick="testApiKeyButton()" id="test-key-btn" class="px-3 py-1 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 text-purple-300 font-semibold text-xs border border-purple-500/30 transition-all flex items-center space-x-1">
+                <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
+                <span>Test Key</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Speech Preferences -->
+        <div class="space-y-3">
+          <label class="text-xs font-bold uppercase tracking-wider text-purple-400 block">Speech & Audio</label>
+          
+          <div class="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/10">
+            <div>
+              <span class="text-xs font-semibold text-slate-200 block">Auto-Speak Translations</span>
+              <span class="text-[11px] text-slate-400">Read translations aloud automatically when completed</span>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="profile-autospeak-toggle" class="sr-only peer">
+              <div class="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+            </label>
+          </div>
+
+          <div class="space-y-1">
+            <div class="flex justify-between text-xs text-slate-300 font-medium">
+              <span>Speech Speed Rate</span>
+              <span id="speech-rate-label" class="font-mono text-purple-300">1.0x</span>
+            </div>
+            <input type="range" id="profile-speech-rate" min="0.7" max="1.5" step="0.1" value="1.0" oninput="document.getElementById('speech-rate-label').innerText = this.value + 'x'" class="w-full accent-purple-500 cursor-pointer">
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="p-4 border-t border-white/10 bg-white/[0.02] flex items-center justify-end space-x-3">
+        <button type="button" onclick="closeProfileModal()" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition-colors">
+          Cancel
+        </button>
+        <button type="button" onclick="saveProfileChanges()" class="px-5 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-semibold text-xs shadow-lg shadow-purple-600/30 flex items-center space-x-1.5 transition-all">
+          <i data-lucide="save" class="w-4 h-4"></i>
+          <span>Save Profile</span>
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+  <!-- Core JavaScript -->
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
