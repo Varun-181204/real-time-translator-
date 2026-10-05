@@ -1,11 +1,14 @@
 /**
- * OmniTranslate AI - Core Client Application
- * Handles Real-Time Speech Recognition, Audio Visualizer, Translation,
- * Speech Synthesis, Two-Way Conversation, Profile & History Management.
+ * OmniTranslate - Core Client Application
+ * Production Dark Navy + Electric Blue + Cyan Suite
+ * Real-Time Speech Recognition, Audio Visualizer, Dynamic Health,
+ * Authentication & Session Handling, Offline Support, History & Profile.
  */
 
 // Application State
 const state = {
+  user: null,
+  isAuthenticated: false,
   config: null,
   profile: null,
   activeMode: 'translate', // 'translate', 'dialogue', 'voice'
@@ -38,18 +41,51 @@ const AVATAR_MAP = {
 };
 
 let voiceStateTimeout = null;
+let healthCheckInterval = null;
 
 // -------------------------------------------------------------
 // 1. Initialization
 // -------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', async () => {
-  await fetchAppConfig();
-  initLucide();
-  setupEventListeners();
-  setupSpeechRecognition();
-  loadHistory();
-  updateUIFromProfile();
-  setVoiceState('ready', 'Ready to speak');
+  // Register Service Worker for offline capabilities
+  if ('serviceWorker' in navigator) {
+    try {
+      await navigator.serviceWorker.register('/sw.js');
+      console.log('OmniTranslate Service Worker registered');
+    } catch (e) {
+      console.warn('Service Worker registration skipped:', e);
+    }
+  }
+
+  // Network connection status listeners
+  window.addEventListener('online', () => {
+    updateOnlineStatus();
+    showToast('Internet connection restored', 'success');
+  });
+
+  window.addEventListener('offline', () => {
+    updateOnlineStatus();
+    showToast("You're offline. Translation requires an active internet connection.", 'error');
+  });
+
+  // Verify active user session
+  await checkAuth();
+
+  // If authenticated, initialize application components
+  if (state.isAuthenticated) {
+    await fetchAppConfig();
+    initLucide();
+    setupEventListeners();
+    setupSpeechRecognition();
+    loadHistory();
+    updateUIFromProfile();
+    setVoiceState('ready', 'Ready to speak');
+    updateOnlineStatus();
+
+    // Periodic dynamic health check every 30 seconds
+    if (healthCheckInterval) clearInterval(healthCheckInterval);
+    healthCheckInterval = setInterval(updateOnlineStatus, 30000);
+  }
 });
 
 function initLucide() {
@@ -58,58 +94,335 @@ function initLucide() {
   }
 }
 
+// -------------------------------------------------------------
+// 2. Authentication & Session Management
+// -------------------------------------------------------------
+async function checkAuth() {
+  try {
+    const res = await fetch('/api/auth/me');
+    const data = await res.json();
+    if (data.authenticated && data.user) {
+      state.isAuthenticated = true;
+      state.user = data.user;
+      state.profile = data.profile || {};
+      showAppView();
+    } else {
+      state.isAuthenticated = false;
+      state.user = null;
+      state.profile = null;
+      showAuthView();
+    }
+  } catch (err) {
+    console.warn('Session verification check failed:', err);
+    state.isAuthenticated = false;
+    showAuthView();
+  }
+}
+
+function showAuthView() {
+  const authView = document.getElementById('auth-view');
+  const appView = document.getElementById('app-view');
+  if (authView) authView.classList.remove('hidden');
+  if (appView) appView.classList.add('hidden');
+  switchAuthMode('login');
+  initLucide();
+}
+
+function showAppView() {
+  const authView = document.getElementById('auth-view');
+  const appView = document.getElementById('app-view');
+  if (authView) authView.classList.add('hidden');
+  if (appView) appView.classList.remove('hidden');
+  initLucide();
+}
+
+function switchAuthMode(mode) {
+  const loginContainer = document.getElementById('login-container');
+  const signupContainer = document.getElementById('signup-container');
+  const loginErr = document.getElementById('login-error-msg');
+  const signupErr = document.getElementById('signup-error-msg');
+
+  if (loginErr) loginErr.classList.add('hidden');
+  if (signupErr) signupErr.classList.add('hidden');
+
+  if (mode === 'signup') {
+    loginContainer?.classList.add('hidden');
+    signupContainer?.classList.remove('hidden');
+  } else {
+    signupContainer?.classList.add('hidden');
+    loginContainer?.classList.remove('hidden');
+  }
+  initLucide();
+}
+
+function togglePasswordVisibility(inputId, iconId) {
+  const input = document.getElementById(inputId);
+  const icon = document.getElementById(iconId);
+  if (!input) return;
+
+  if (input.type === 'password') {
+    input.type = 'text';
+    if (icon) icon.setAttribute('data-lucide', 'eye-off');
+  } else {
+    input.type = 'password';
+    if (icon) icon.setAttribute('data-lucide', 'eye');
+  }
+  initLucide();
+}
+
+function showForgotPasswordModal() {
+  showToast('Password reset: Please contact your system administrator or register a new account.', 'info');
+}
+
+async function handleLoginSubmit(event) {
+  event.preventDefault();
+  const emailInput = document.getElementById('login-email');
+  const passwordInput = document.getElementById('login-password');
+  const errorMsg = document.getElementById('login-error-msg');
+  const submitBtn = document.getElementById('login-submit-btn');
+
+  const email = emailInput?.value?.trim() || '';
+  const password = passwordInput?.value || '';
+
+  if (!email || !password) {
+    if (errorMsg) {
+      errorMsg.textContent = 'Please enter both email and password.';
+      errorMsg.classList.remove('hidden');
+    }
+    return;
+  }
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = `<span class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></span> Signing In...`;
+  }
+  if (errorMsg) errorMsg.classList.add('hidden');
+
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    const data = await res.json();
+
+    if (res.ok && data.success) {
+      state.isAuthenticated = true;
+      state.user = data.user;
+      state.profile = data.profile || {};
+
+      showAppView();
+      await fetchAppConfig();
+      initLucide();
+      setupEventListeners();
+      setupSpeechRecognition();
+      loadHistory();
+      updateUIFromProfile();
+      setVoiceState('ready', 'Ready to speak');
+      updateOnlineStatus();
+
+      showToast(`Welcome back, ${data.user.name}!`, 'success');
+    } else {
+      if (errorMsg) {
+        errorMsg.textContent = data.error || 'Invalid email or password.';
+        errorMsg.classList.remove('hidden');
+      }
+    }
+  } catch (err) {
+    console.error('Sign in request error:', err);
+    if (errorMsg) {
+      errorMsg.textContent = 'Connection error. Please try again.';
+      errorMsg.classList.remove('hidden');
+    }
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = `<span>Sign In</span>`;
+    }
+  }
+}
+
+async function handleSignupSubmit(event) {
+  event.preventDefault();
+  const nameInput = document.getElementById('signup-name');
+  const emailInput = document.getElementById('signup-email');
+  const passwordInput = document.getElementById('signup-password');
+  const confirmPasswordInput = document.getElementById('signup-confirm-password');
+  const errorMsg = document.getElementById('signup-error-msg');
+  const submitBtn = document.getElementById('signup-submit-btn');
+
+  const name = nameInput?.value?.trim() || '';
+  const email = emailInput?.value?.trim() || '';
+  const password = passwordInput?.value || '';
+  const confirm_password = confirmPasswordInput?.value || '';
+
+  if (password !== confirm_password) {
+    if (errorMsg) {
+      errorMsg.textContent = 'Passwords do not match.';
+      errorMsg.classList.remove('hidden');
+    }
+    return;
+  }
+
+  if (password.length < 6) {
+    if (errorMsg) {
+      errorMsg.textContent = 'Password must be at least 6 characters.';
+      errorMsg.classList.remove('hidden');
+    }
+    return;
+  }
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = `<span class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></span> Creating Account...`;
+  }
+  if (errorMsg) errorMsg.classList.add('hidden');
+
+  try {
+    const res = await fetch('/api/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, password, confirm_password })
+    });
+    const data = await res.json();
+
+    if (res.ok && data.success) {
+      state.isAuthenticated = true;
+      state.user = data.user;
+      state.profile = data.profile || {};
+
+      showAppView();
+      await fetchAppConfig();
+      initLucide();
+      setupEventListeners();
+      setupSpeechRecognition();
+      loadHistory();
+      updateUIFromProfile();
+      setVoiceState('ready', 'Ready to speak');
+      updateOnlineStatus();
+
+      showToast(`Account created! Welcome, ${data.user.name}!`, 'success');
+    } else {
+      if (errorMsg) {
+        errorMsg.textContent = data.error || 'Failed to create account.';
+        errorMsg.classList.remove('hidden');
+      }
+    }
+  } catch (err) {
+    console.error('Sign up request error:', err);
+    if (errorMsg) {
+      errorMsg.textContent = 'Connection error. Please try again.';
+      errorMsg.classList.remove('hidden');
+    }
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = `<span>Create Account</span>`;
+    }
+  }
+}
+
+async function handleLogout() {
+  try {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  } catch (err) {
+    console.warn('Logout API error:', err);
+  }
+  closeProfileModal();
+  state.isAuthenticated = false;
+  state.user = null;
+  state.profile = null;
+  showAuthView();
+  showToast('You have been signed out.', 'info');
+}
+
+// -------------------------------------------------------------
+// 3. System Configuration & Dynamic Health Indicator
+// -------------------------------------------------------------
 async function fetchAppConfig() {
   try {
     const res = await fetch('/api/config');
     const data = await res.json();
     state.config = data;
-    state.profile = data.profile || {};
+    if (data.profile) state.profile = data.profile;
+    if (data.user) state.user = data.user;
 
     // Populate dropdowns & pills
     populateLanguageSelects();
     populateTonePills();
     populateProfileModalFields();
-
-    // Check system API key status badge
-    updateEngineBadge();
   } catch (err) {
     console.error('Failed to load configuration:', err);
     showToast('Failed to load system config', 'error');
   }
 }
 
-function updateEngineBadge() {
+async function updateOnlineStatus() {
   const badge = document.getElementById('engine-status-badge');
+  const dot = document.getElementById('engine-status-dot');
   const text = document.getElementById('engine-status-text');
-  if (!badge || !text) return;
+  if (!badge || !dot || !text) return;
 
-  if (state.profile?.custom_api_key) {
-    text.textContent = 'Custom Gemini Key';
-    badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-purple-500/10 border border-purple-500/25 text-purple-300 hover:bg-purple-500/20 transition-all text-xs font-medium cursor-pointer';
-  } else if (state.config?.env_key_present) {
-    text.textContent = 'Gemini 3.8 Active';
-    badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 hover:bg-emerald-500/20 transition-all text-xs font-medium cursor-pointer';
-  } else {
-    text.textContent = 'Fallback Mode';
-    badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-amber-400 hover:bg-amber-500/20 transition-all text-xs font-medium cursor-pointer';
+  // 1. Browser offline state
+  if (!navigator.onLine) {
+    text.textContent = 'Offline';
+    dot.className = 'w-2 h-2 rounded-full bg-[#64748B]';
+    badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-[#0F1422] border border-[#263149] text-xs font-medium text-[#94A3B8]';
+    badge.title = 'No internet connection detected';
+    return;
+  }
+
+  // 2. Dynamic server & AI connection health check
+  try {
+    const res = await fetch('/api/health');
+    const data = await res.json();
+
+    if (res.ok && data.status === 'online') {
+      if (state.profile?.has_custom_key) {
+        text.textContent = 'Custom Gemini Key · Online';
+      } else {
+        text.textContent = 'Gemini 3.8 Flash · Online';
+      }
+      dot.className = 'w-2 h-2 rounded-full bg-[#22C55E]';
+      badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-[#0F1422] border border-[#263149] text-xs font-medium text-[#F8FAFC]';
+      badge.title = 'Gemini AI service connected and ready';
+    } else {
+      text.textContent = 'Translation service unavailable';
+      dot.className = 'w-2 h-2 rounded-full bg-[#EF4444]';
+      badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-[#0F1422] border border-[#EF4444]/30 text-xs font-medium text-[#EF4444]';
+      badge.title = 'AI translation backend unavailable';
+    }
+  } catch (err) {
+    text.textContent = 'Translation service unavailable';
+    dot.className = 'w-2 h-2 rounded-full bg-[#EF4444]';
+    badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-[#0F1422] border border-[#EF4444]/30 text-xs font-medium text-[#EF4444]';
+    badge.title = 'Could not reach server';
   }
 }
 
 function updateUIFromProfile() {
-  if (!state.profile) return;
-  
-  // Update header avatar & username
+  if (!state.profile && !state.user) return;
+
+  // Update header avatar & authenticated user name
   const navAvatar = document.getElementById('nav-avatar');
   const navUsername = document.getElementById('nav-username');
-  const emoji = AVATAR_MAP[state.profile.avatar] || '🚀';
-  
+  const avatarKey = state.profile?.avatar || state.user?.avatar || 'astronaut';
+  const emoji = AVATAR_MAP[avatarKey] || '🚀';
+  const displayName = state.user?.name || state.profile?.name || 'User';
+
   if (navAvatar) navAvatar.textContent = emoji;
-  if (navUsername) navUsername.textContent = state.profile.name || 'Voyager';
+  if (navUsername) navUsername.textContent = displayName;
+
+  // Update email in profile modal
+  const profileEmail = document.getElementById('profile-email-display');
+  if (profileEmail) {
+    profileEmail.value = state.user?.email || '';
+  }
 
   // Update default languages if not manually changed
-  state.sourceLang = state.profile.native_language || 'auto';
-  state.targetLang = state.profile.default_target || 'es';
-  state.activeTone = state.profile.tone || 'natural';
+  state.sourceLang = state.profile?.native_language || 'auto';
+  state.targetLang = state.profile?.default_target || 'es';
+  state.activeTone = state.profile?.tone || 'natural';
 
   const srcSelect = document.getElementById('source-lang-select');
   const tgtSelect = document.getElementById('target-lang-select');
@@ -120,11 +433,11 @@ function updateUIFromProfile() {
   highlightActiveTonePill();
 
   // Sync auto-speak controls
-  updateAutoSpeakButtonsUI(Boolean(state.profile.auto_speak));
+  updateAutoSpeakButtonsUI(Boolean(state.profile?.auto_speak));
 }
 
 // -------------------------------------------------------------
-// 2. DOM Population
+// 4. Language Selectors & Tone Configuration
 // -------------------------------------------------------------
 function populateLanguageSelects() {
   if (!state.config?.languages) return;
@@ -171,9 +484,13 @@ function populateTonePills() {
     const btn = document.createElement('button');
     btn.type = 'button';
     const isActive = t.id === state.activeTone;
-    btn.className = `tone-pill px-3 py-1.5 rounded-xl text-xs font-medium border border-white/10 text-slate-300 hover:text-white hover:bg-white/[0.08] ${isActive ? 'active' : ''}`;
+    btn.className = `tone-pill px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
+      isActive
+        ? 'active bg-[#4F8CFF]/15 border-[#4F8CFF] text-[#4F8CFF] shadow-sm shadow-[#4F8CFF]/20'
+        : 'border-[#263149] bg-[#0F1422] text-[#94A3B8] hover:text-[#F8FAFC] hover:bg-[#172033]'
+    }`;
     btn.setAttribute('data-tone-id', t.id);
-    btn.innerHTML = `<span class="flex items-center space-x-1"><span class="w-1.5 h-1.5 rounded-full ${isActive ? 'bg-purple-300' : 'bg-slate-600'} tone-dot mr-1.5"></span><span>${t.name}</span></span>`;
+    btn.innerHTML = `<span class="flex items-center space-x-1.5"><span class="w-1.5 h-1.5 rounded-full ${isActive ? 'bg-[#4F8CFF]' : 'bg-[#64748B]'} tone-dot mr-1"></span><span>${t.name}</span></span>`;
     btn.onclick = () => selectTone(t.id);
     container.appendChild(btn);
   });
@@ -194,7 +511,6 @@ function populateTonePills() {
 function selectTone(toneId) {
   state.activeTone = toneId;
   highlightActiveTonePill();
-  // If source text exists, re-translate automatically with new tone
   const input = document.getElementById('source-input')?.value?.trim();
   if (input) {
     triggerTranslation();
@@ -205,15 +521,20 @@ function highlightActiveTonePill() {
   document.querySelectorAll('.tone-pill').forEach(btn => {
     const isActive = btn.getAttribute('data-tone-id') === state.activeTone;
     btn.classList.toggle('active', isActive);
+    btn.className = `tone-pill px-3 py-1.5 rounded-xl text-xs font-medium border transition-all ${
+      isActive
+        ? 'active bg-[#4F8CFF]/15 border-[#4F8CFF] text-[#4F8CFF] shadow-sm shadow-[#4F8CFF]/20'
+        : 'border-[#263149] bg-[#0F1422] text-[#94A3B8] hover:text-[#F8FAFC] hover:bg-[#172033]'
+    }`;
     const dot = btn.querySelector('.tone-dot');
     if (dot) {
-      dot.className = `w-1.5 h-1.5 rounded-full ${isActive ? 'bg-purple-300' : 'bg-slate-600'} tone-dot mr-1.5`;
+      dot.className = `w-1.5 h-1.5 rounded-full ${isActive ? 'bg-[#4F8CFF]' : 'bg-[#64748B]'} tone-dot mr-1`;
     }
   });
 }
 
 // -------------------------------------------------------------
-// 3. Event Listeners & Shortcuts
+// 5. Event Listeners & Keyboard Shortcuts
 // -------------------------------------------------------------
 function setupEventListeners() {
   const sourceInput = document.getElementById('source-input');
@@ -233,12 +554,26 @@ function setupEventListeners() {
 
   // Global keyboard shortcuts
   window.addEventListener('keydown', (e) => {
-    // Ctrl + S: Swap languages
+    // Escape: Cancel active speech recognition or close drawer/modals
+    if (e.key === 'Escape') {
+      if (state.isListening) {
+        stopMicrophone();
+        setVoiceState('ready', 'Speech cancelled');
+      }
+      closeProfileModal();
+      const drawer = document.getElementById('history-drawer');
+      if (drawer && !drawer.classList.contains('translate-x-full')) {
+        toggleHistoryDrawer();
+      }
+    }
+
+    // Ctrl + S: Swap languages in Translate mode
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && state.activeMode === 'translate') {
       e.preventDefault();
       swapLanguages();
     }
-    // Space when not typing in textarea or input: toggle microphone
+
+    // Space: Toggle microphone when not typing in an input/textarea
     if (e.code === 'Space' && document.activeElement.tagName !== 'TEXTAREA' && document.activeElement.tagName !== 'INPUT') {
       e.preventDefault();
       toggleMicrophone();
@@ -260,23 +595,20 @@ function updateSourceCharAndWordCount() {
 }
 
 // -------------------------------------------------------------
-// 4. Mode Switching
+// 6. Mode Switching
 // -------------------------------------------------------------
 function switchMode(mode) {
   state.activeMode = mode;
-  
-  // Stop any active mic/continuous listening
+
   stopMicrophone();
   if (state.continuousVoiceActive) {
     toggleContinuousVoice();
   }
 
-  // Update tabs
   document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
   const activeTab = document.getElementById(`nav-mode-${mode}`);
   if (activeTab) activeTab.classList.add('active');
 
-  // Toggle views
   document.getElementById('view-translate').classList.toggle('hidden', mode !== 'translate');
   document.getElementById('view-dialogue').classList.toggle('hidden', mode !== 'dialogue');
   document.getElementById('view-voice').classList.toggle('hidden', mode !== 'voice');
@@ -285,9 +617,26 @@ function switchMode(mode) {
 }
 
 // -------------------------------------------------------------
-// 5. Translation Logic
+// 7. Translation Logic (With Offline Safeguards)
 // -------------------------------------------------------------
 async function triggerTranslation(customText = null, overrideTarget = null, overrideSource = null) {
+  // Offline verification
+  if (!navigator.onLine) {
+    showToast("You're offline. Reconnect to the internet to use Gemini translation.", 'error');
+    setVoiceState('error', 'Offline - No connection');
+    const container = document.getElementById('target-text-container');
+    if (container) {
+      container.innerHTML = `
+        <div class="p-4 rounded-xl bg-[#0F1422] border border-[#F59E0B]/30 text-[#F59E0B] text-xs space-y-1">
+          <p class="font-bold flex items-center"><i data-lucide="wifi-off" class="w-4 h-4 mr-1.5"></i> You're offline</p>
+          <p class="text-[#94A3B8]">Please reconnect to the internet to perform real-time AI translations.</p>
+        </div>
+      `;
+      initLucide();
+    }
+    return;
+  }
+
   const sourceInput = document.getElementById('source-input');
   const text = customText !== null ? customText : sourceInput?.value?.trim();
 
@@ -300,9 +649,7 @@ async function triggerTranslation(customText = null, overrideTarget = null, over
   const sourceLang = overrideSource || document.getElementById('source-lang-select').value;
   const tone = state.activeTone || 'natural';
   const model = state.profile?.model || 'gemini-3.8-flash';
-  const customApiKey = state.profile?.custom_api_key || '';
 
-  // Show loading UI & update voice status
   setTranslationLoading(true);
   setVoiceState('processing', 'Translating with Gemini AI...');
 
@@ -316,10 +663,16 @@ async function triggerTranslation(customText = null, overrideTarget = null, over
         source_lang: sourceLang,
         tone,
         model,
-        custom_api_key: customApiKey,
         save_history: true
       })
     });
+
+    if (res.status === 401) {
+      setTranslationLoading(false);
+      showToast('Session expired. Please sign in again.', 'error');
+      showAuthView();
+      return;
+    }
 
     const data = await res.json();
     setTranslationLoading(false);
@@ -329,12 +682,10 @@ async function triggerTranslation(customText = null, overrideTarget = null, over
       state.currentHistoryId = data.history_id;
       renderTranslationResult(data);
 
-      // Auto-speak if enabled
       if (state.profile?.auto_speak) {
         speakText(data.translated_text, targetLang);
       }
 
-      // Refresh history list
       loadHistory();
     } else {
       setVoiceState('error', 'Translation failed');
@@ -373,7 +724,7 @@ function renderTranslationResult(data) {
     container.classList.remove('opacity-40');
   }
 
-  // Pronunciation
+  // Phonetic pronunciation
   if (data.pronunciation && data.pronunciation.trim()) {
     if (pronText) pronText.textContent = data.pronunciation;
     pronCard?.classList.remove('hidden');
@@ -381,7 +732,7 @@ function renderTranslationResult(data) {
     pronCard?.classList.add('hidden');
   }
 
-  // Nuance
+  // Linguistic & cultural nuance note
   if (data.nuance_note && data.nuance_note.trim()) {
     if (nuanceText) nuanceText.textContent = data.nuance_note;
     nuanceCard?.classList.remove('hidden');
@@ -389,7 +740,7 @@ function renderTranslationResult(data) {
     nuanceCard?.classList.add('hidden');
   }
 
-  // Engine badge
+  // Engine model badge
   if (enginePill) {
     enginePill.textContent = data.engine || 'Gemini 3.8 Flash';
   }
@@ -402,8 +753,8 @@ function renderTranslationResult(data) {
 
   // Star status reset
   if (starIcon) {
-    starIcon.classList.remove('fill-amber-400', 'text-amber-400');
-    starIcon.classList.add('text-slate-400');
+    starIcon.classList.remove('fill-[#F59E0B]', 'text-[#F59E0B]');
+    starIcon.classList.add('text-[#94A3B8]');
   }
 
   setVoiceState('success', 'Translation ready');
@@ -425,18 +776,19 @@ function clearSourceInput() {
     input.focus();
   }
 
-  // Reset target container to clean empty state
+  // Reset target card to modern empty state
   state.currentTranslation = null;
   state.currentHistoryId = null;
   const container = document.getElementById('target-text-container');
   if (container) {
     container.innerHTML = `
-      <div id="target-empty-state" class="h-full flex flex-col items-center justify-center text-center py-8 text-slate-500">
-        <div class="w-12 h-12 rounded-2xl bg-white/[0.03] border border-white/[0.08] flex items-center justify-center mb-3">
-          <i data-lucide="globe-2" class="w-6 h-6 text-purple-400/50"></i>
+      <div id="target-empty-state" class="h-full flex flex-col items-center justify-center text-center py-8 text-[#64748B]">
+        <div class="w-12 h-12 rounded-2xl bg-[#0F1422] border border-[#263149] flex items-center justify-center mb-3">
+          <i data-lucide="globe-2" class="w-6 h-6 text-[#4F8CFF]/60"></i>
         </div>
-        <p class="text-sm font-medium text-slate-400">Translations appear here in real time</p>
-        <p class="text-xs text-slate-500 mt-1">Type, click Speak, or upload an audio file</p>
+        <p class="text-sm font-semibold text-[#94A3B8]">Translation</p>
+        <p class="text-xs text-[#64748B] mt-1">Your translation will appear here.</p>
+        <p class="text-[11px] text-[#64748B] mt-0.5">Type, speak, or upload audio to begin.</p>
       </div>
     `;
     initLucide();
@@ -497,13 +849,12 @@ function handleSourceLangChange() {
 
 function handleTargetLangChange() {
   state.targetLang = document.getElementById('target-lang-select').value;
-  // If there is input, re-translate
   const input = document.getElementById('source-input')?.value?.trim();
   if (input) triggerTranslation();
 }
 
 // -------------------------------------------------------------
-// 6. Voice Interaction States & Web Audio Visualizer
+// 8. Voice Interaction States & Web Audio Visualizer
 // -------------------------------------------------------------
 function setVoiceState(status, message) {
   const pill = document.getElementById('voice-state-pill');
@@ -522,7 +873,7 @@ function setVoiceState(status, message) {
     case 'listening':
       pill.classList.add('voice-state-listening');
       pill.innerHTML = `
-        <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+        <span class="w-2 h-2 rounded-full bg-[#EF4444] animate-ping"></span>
         <span id="voice-state-text">${message || 'Listening... Speak now'}</span>
       `;
       if (waveformBox) waveformBox.classList.remove('hidden');
@@ -531,8 +882,8 @@ function setVoiceState(status, message) {
     case 'processing':
       pill.classList.add('voice-state-processing');
       pill.innerHTML = `
-        <span class="w-3 h-3 rounded-full border-2 border-purple-400 border-t-transparent animate-spin inline-block"></span>
-        <span id="voice-state-text">${message || 'Processing speech...'}</span>
+        <span class="w-3 h-3 rounded-full border-2 border-[#4F8CFF] border-t-transparent animate-spin inline-block"></span>
+        <span id="voice-state-text">${message || 'Translating with Gemini AI...'}</span>
       `;
       if (waveformBox) waveformBox.classList.add('hidden');
       break;
@@ -540,7 +891,7 @@ function setVoiceState(status, message) {
     case 'success':
       pill.classList.add('voice-state-success');
       pill.innerHTML = `
-        <i data-lucide="check-circle" class="w-3.5 h-3.5 text-emerald-400"></i>
+        <i data-lucide="check-circle" class="w-3.5 h-3.5 text-[#22C55E]"></i>
         <span id="voice-state-text">${message || 'Translation ready'}</span>
       `;
       if (waveformBox) waveformBox.classList.add('hidden');
@@ -553,7 +904,7 @@ function setVoiceState(status, message) {
     case 'error':
       pill.classList.add('voice-state-error');
       pill.innerHTML = `
-        <i data-lucide="alert-circle" class="w-3.5 h-3.5 text-rose-400"></i>
+        <i data-lucide="alert-circle" class="w-3.5 h-3.5 text-[#EF4444]"></i>
         <span id="voice-state-text">${message || 'Microphone error'}</span>
       `;
       if (waveformBox) waveformBox.classList.add('hidden');
@@ -567,7 +918,7 @@ function setVoiceState(status, message) {
     default:
       pill.classList.add('voice-state-ready');
       pill.innerHTML = `
-        <span class="w-2 h-2 rounded-full bg-slate-400"></span>
+        <span class="w-2 h-2 rounded-full bg-[#64748B]"></span>
         <span id="voice-state-text">${message || 'Ready to speak'}</span>
       `;
       if (waveformBox) waveformBox.classList.add('hidden');
@@ -635,7 +986,7 @@ function setupSpeechRecognition() {
     if (state.activeMode === 'translate') {
       const text = document.getElementById('source-input')?.value?.trim();
       if (text) {
-        setVoiceState('processing', 'Processing speech & translating...');
+        setVoiceState('processing', 'Translating with Gemini AI...');
         triggerTranslation();
       } else {
         setVoiceState('ready', 'Ready to speak');
@@ -669,12 +1020,11 @@ function startMicrophone() {
     return;
   }
 
-  // Set language for recognition
   let langCode = state.sourceLang;
   if (langCode === 'auto') {
     langCode = state.profile?.native_language || 'en';
   }
-  
+
   const match = state.config?.languages?.find(l => l.code === langCode);
   state.recognition.lang = match?.speech_code || 'en-US';
 
@@ -702,19 +1052,19 @@ function updateMicButtonUI(isRecording) {
 
   if (isRecording) {
     if (btn) {
-      btn.className = 'px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center space-x-2 cursor-pointer bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/30 ring-2 ring-rose-400/50 animate-pulse';
+      btn.className = 'px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center space-x-2 cursor-pointer bg-[#EF4444] hover:bg-[#EF4444]/90 text-white shadow-lg shadow-[#EF4444]/30 ring-2 ring-[#EF4444]/50 animate-pulse';
     }
     if (text) text.textContent = 'Listening...';
   } else {
     if (btn) {
-      btn.className = 'btn-primary-action px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center space-x-2 group cursor-pointer';
+      btn.className = 'btn-primary px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center space-x-2 group cursor-pointer';
     }
     if (text) text.textContent = 'Speak';
   }
 }
 
 // -------------------------------------------------------------
-// 7. Dynamic Web Audio Waveform Visualizer
+// 9. Web Audio Waveform Visualizer (Electric Blue & Cyan Palette)
 // -------------------------------------------------------------
 async function startVisualizer() {
   const canvas = document.getElementById('mic-waveform');
@@ -755,8 +1105,8 @@ async function startVisualizer() {
         const y = (canvas.height - barHeight) / 2;
 
         const gradient = ctx.createLinearGradient(0, y, 0, y + barHeight);
-        gradient.addColorStop(0, '#c084fc');
-        gradient.addColorStop(1, '#6366f1');
+        gradient.addColorStop(0, '#22D3EE'); // Cyan
+        gradient.addColorStop(1, '#4F8CFF'); // Electric Blue
 
         ctx.fillStyle = gradient;
         ctx.beginPath();
@@ -788,7 +1138,7 @@ function stopVisualizer() {
 }
 
 // -------------------------------------------------------------
-// 8. Text-to-Speech (TTS) & Auto-Speak
+// 10. Text-to-Speech (TTS) & Auto-Speak
 // -------------------------------------------------------------
 function speakTranslatedText() {
   const text = state.currentTranslation?.translated_text;
@@ -818,7 +1168,7 @@ function speakText(text, langCode) {
 
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
-  
+
   utterance.rate = state.profile?.speech_rate || 1.0;
   utterance.pitch = 1.0;
 
@@ -830,14 +1180,14 @@ function speakText(text, langCode) {
   }
 
   const icon = document.getElementById('speak-target-icon');
-  if (icon) icon.classList.add('text-purple-400', 'animate-pulse');
+  if (icon) icon.classList.add('text-[#4F8CFF]', 'animate-pulse');
 
   utterance.onend = () => {
-    if (icon) icon.classList.remove('text-purple-400', 'animate-pulse');
+    if (icon) icon.classList.remove('text-[#4F8CFF]', 'animate-pulse');
   };
 
   utterance.onerror = () => {
-    if (icon) icon.classList.remove('text-purple-400', 'animate-pulse');
+    if (icon) icon.classList.remove('text-[#4F8CFF]', 'animate-pulse');
     fallbackServerTTS(text, langCode);
   };
 
@@ -901,7 +1251,7 @@ function updateAutoSpeakButtonsUI(isActive) {
 }
 
 // -------------------------------------------------------------
-// 9. Two-Way Conversation / Dialogue Mode
+// 11. Two-Way Conversation / Dialogue Mode
 // -------------------------------------------------------------
 function startDialogueSpeaker(speakerNum) {
   state.dialogueSpeaker = speakerNum;
@@ -916,7 +1266,7 @@ function startDialogueSpeaker(speakerNum) {
     try {
       state.recognition.start();
       const micBtn = document.getElementById(`dialogue-mic-${speakerNum}`);
-      micBtn?.classList.add('animate-pulse', 'ring-4', 'ring-purple-500/50');
+      micBtn?.classList.add('animate-pulse', 'ring-4', 'ring-[#4F8CFF]/50');
     } catch(e) {}
   }
 }
@@ -924,7 +1274,7 @@ function startDialogueSpeaker(speakerNum) {
 async function handleDialogueUtteranceFinished() {
   const text = state.dialogueCurrentText?.trim();
   state.dialogueCurrentText = '';
-  document.querySelectorAll('[id^="dialogue-mic-"]').forEach(btn => btn.classList.remove('animate-pulse', 'ring-4', 'ring-purple-500/50'));
+  document.querySelectorAll('[id^="dialogue-mic-"]').forEach(btn => btn.classList.remove('animate-pulse', 'ring-4', 'ring-[#4F8CFF]/50'));
 
   if (!text) return;
 
@@ -947,7 +1297,6 @@ async function handleDialogueUtteranceFinished() {
         target_lang: tgtLang,
         tone: state.profile?.tone || 'casual',
         model: state.profile?.model || 'gemini-3.8-flash',
-        custom_api_key: state.profile?.custom_api_key || '',
         save_history: true
       })
     });
@@ -973,12 +1322,12 @@ function appendDialogueBubble(speaker, originalText, translatedPlaceholder) {
   bubble.className = `flex ${isSpeaker1 ? 'justify-start' : 'justify-end'} animate-in fade-in slide-in-from-bottom-2 duration-300`;
   bubble.innerHTML = `
     <div class="max-w-[80%] p-3.5 ${isSpeaker1 ? 'chat-bubble-speaker1' : 'chat-bubble-speaker2'} shadow-xl">
-      <div class="flex items-center space-x-2 mb-1 text-[11px] font-bold ${isSpeaker1 ? 'text-purple-300' : 'text-indigo-300'}">
+      <div class="flex items-center space-x-2 mb-1 text-[11px] font-bold ${isSpeaker1 ? 'text-[#4F8CFF]' : 'text-[#22D3EE]'}">
         <span>${isSpeaker1 ? 'Speaker 1' : 'Speaker 2'}</span>
       </div>
-      <p class="text-xs text-slate-300 mb-1.5 opacity-90">${escapeHtml(originalText)}</p>
-      <div class="border-t border-white/10 pt-1.5">
-        <p class="text-sm font-semibold text-white dialogue-translated-text">${escapeHtml(translatedPlaceholder)}</p>
+      <p class="text-xs text-[#94A3B8] mb-1.5 opacity-90">${escapeHtml(originalText)}</p>
+      <div class="border-t border-[#263149] pt-1.5">
+        <p class="text-sm font-semibold text-[#F8FAFC] dialogue-translated-text">${escapeHtml(translatedPlaceholder)}</p>
       </div>
     </div>
   `;
@@ -998,11 +1347,11 @@ function clearDialogueStream() {
   const stream = document.getElementById('dialogue-chat-stream');
   if (stream) {
     stream.innerHTML = `
-      <div class="text-center py-10 text-slate-500 text-xs">
-        <div class="w-12 h-12 rounded-2xl bg-white/[0.03] border border-white/[0.08] flex items-center justify-center mx-auto mb-3">
-          <i data-lucide="mic-2" class="w-6 h-6 text-purple-400/50"></i>
+      <div class="text-center py-10 text-[#64748B] text-xs">
+        <div class="w-12 h-12 rounded-2xl bg-[#0F1422] border border-[#263149] flex items-center justify-center mx-auto mb-3">
+          <i data-lucide="mic-2" class="w-6 h-6 text-[#4F8CFF]/60"></i>
         </div>
-        <p class="font-medium text-slate-400">Chat cleared. Tap either speaker's microphone to start talking.</p>
+        <p class="font-medium text-[#94A3B8]">Chat cleared. Tap either speaker's microphone to start talking.</p>
       </div>
     `;
     initLucide();
@@ -1010,7 +1359,7 @@ function clearDialogueStream() {
 }
 
 // -------------------------------------------------------------
-// 10. Voice Studio Mode
+// 12. Voice Studio Mode
 // -------------------------------------------------------------
 function toggleContinuousVoice() {
   state.continuousVoiceActive = !state.continuousVoiceActive;
@@ -1020,25 +1369,25 @@ function toggleContinuousVoice() {
   const statusPill = document.getElementById('studio-status-pill');
 
   if (state.continuousVoiceActive) {
-    btn.className = 'px-6 py-3 rounded-2xl text-sm font-bold flex items-center space-x-2 bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/30';
+    btn.className = 'px-6 py-3 rounded-2xl text-sm font-bold flex items-center space-x-2 bg-[#EF4444] hover:bg-[#EF4444]/90 text-white shadow-lg shadow-[#EF4444]/30';
     label.textContent = 'Stop Listening';
     icon.setAttribute('data-lucide', 'square');
     statusPill.textContent = 'Listening Live';
-    statusPill.className = 'text-rose-400 font-mono text-[11px] animate-pulse';
+    statusPill.className = 'text-[#EF4444] font-mono text-[11px] animate-pulse';
     startMicrophone();
   } else {
-    btn.className = 'btn-primary-action px-6 py-3 rounded-2xl text-sm font-bold flex items-center space-x-2';
+    btn.className = 'btn-primary px-6 py-3 rounded-2xl text-sm font-bold flex items-center space-x-2';
     label.textContent = 'Start Continuous Listening';
     icon.setAttribute('data-lucide', 'play');
     statusPill.textContent = 'Ready';
-    statusPill.className = 'text-emerald-400 font-mono text-[11px]';
+    statusPill.className = 'text-[#22C55E] font-mono text-[11px]';
     stopMicrophone();
   }
   initLucide();
 }
 
 // -------------------------------------------------------------
-// 11. History & Saved Translations
+// 13. History & Saved Translations
 // -------------------------------------------------------------
 async function loadHistory() {
   try {
@@ -1058,8 +1407,8 @@ function renderHistoryList(items) {
 
   if (items.length === 0) {
     container.innerHTML = `
-      <div class="text-center py-10 text-slate-500 text-xs">
-        <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 text-slate-600"></i>
+      <div class="text-center py-10 text-[#64748B] text-xs">
+        <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 text-[#64748B]"></i>
         <p>No history entries found.</p>
       </div>
     `;
@@ -1069,22 +1418,22 @@ function renderHistoryList(items) {
 
   items.forEach(item => {
     const card = document.createElement('div');
-    card.className = 'p-3 rounded-xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 transition-all text-xs space-y-1.5 relative group';
+    card.className = 'p-3 rounded-xl bg-[#121827] hover:bg-[#172033] border border-[#263149] transition-all text-xs space-y-1.5 relative group';
     card.innerHTML = `
-      <div class="flex items-center justify-between text-[10px] text-slate-400">
-        <span class="font-mono">${item.source_lang.toUpperCase()} → ${item.target_lang.toUpperCase()}</span>
+      <div class="flex items-center justify-between text-[10px] text-[#94A3B8]">
+        <span class="font-mono text-[#22D3EE]">${item.source_lang.toUpperCase()} → ${item.target_lang.toUpperCase()}</span>
         <div class="flex items-center space-x-1.5">
-          <button onclick="toggleHistoryItemStar(${item.id})" class="p-1 hover:text-amber-400 ${item.is_favorite ? 'text-amber-400' : 'text-slate-500'}">
-            <i data-lucide="star" class="w-3.5 h-3.5 ${item.is_favorite ? 'fill-amber-400' : ''}"></i>
+          <button onclick="toggleHistoryItemStar(${item.id})" class="p-1 hover:text-[#F59E0B] ${item.is_favorite ? 'text-[#F59E0B]' : 'text-[#64748B]'}">
+            <i data-lucide="star" class="w-3.5 h-3.5 ${item.is_favorite ? 'fill-[#F59E0B]' : ''}"></i>
           </button>
-          <button onclick="deleteHistoryItem(${item.id})" class="p-1 hover:text-rose-400 text-slate-500">
+          <button onclick="deleteHistoryItem(${item.id})" class="p-1 hover:text-[#EF4444] text-[#64748B]">
             <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
           </button>
         </div>
       </div>
-      <p class="text-slate-300 line-clamp-2 cursor-pointer" onclick="recallHistory(${item.id})">${escapeHtml(item.source_text)}</p>
-      <p class="font-semibold text-purple-300 line-clamp-2 cursor-pointer" onclick="recallHistory(${item.id})">${escapeHtml(item.translated_text)}</p>
-      ${item.pronunciation ? `<p class="text-[11px] font-mono text-purple-200/70 truncate">🔊 ${escapeHtml(item.pronunciation)}</p>` : ''}
+      <p class="text-[#94A3B8] line-clamp-2 cursor-pointer" onclick="recallHistory(${item.id})">${escapeHtml(item.source_text)}</p>
+      <p class="font-semibold text-[#F8FAFC] line-clamp-2 cursor-pointer" onclick="recallHistory(${item.id})">${escapeHtml(item.translated_text)}</p>
+      ${item.pronunciation ? `<p class="text-[11px] font-mono text-[#22D3EE]/80 truncate">🔊 ${escapeHtml(item.pronunciation)}</p>` : ''}
     `;
     container.appendChild(card);
   });
@@ -1145,9 +1494,9 @@ async function toggleStarCurrent() {
   await toggleHistoryItemStar(state.currentHistoryId);
   const icon = document.getElementById('star-icon');
   if (icon) {
-    const isFav = icon.classList.contains('fill-amber-400');
-    icon.classList.toggle('fill-amber-400', !isFav);
-    icon.classList.toggle('text-amber-400', !isFav);
+    const isFav = icon.classList.contains('fill-[#F59E0B]');
+    icon.classList.toggle('fill-[#F59E0B]', !isFav);
+    icon.classList.toggle('text-[#F59E0B]', !isFav);
   }
   showToast('Favorites updated', 'success');
 }
@@ -1184,8 +1533,8 @@ function filterHistory() {
 
 function setHistoryFilter(tab) {
   state.historyFilter = tab;
-  document.getElementById('hist-tab-all').className = tab === 'all' ? 'px-2.5 py-1 rounded-lg bg-purple-600/30 text-purple-300 font-semibold' : 'px-2.5 py-1 rounded-lg bg-white/5 text-slate-400 hover:text-white';
-  document.getElementById('hist-tab-starred').className = tab === 'starred' ? 'px-2.5 py-1 rounded-lg bg-purple-600/30 text-purple-300 font-semibold' : 'px-2.5 py-1 rounded-lg bg-white/5 text-slate-400 hover:text-white';
+  document.getElementById('hist-tab-all').className = tab === 'all' ? 'px-2.5 py-1 rounded-lg bg-[#4F8CFF]/20 text-[#4F8CFF] font-semibold' : 'px-2.5 py-1 rounded-lg bg-[#121827] text-[#94A3B8] hover:text-[#F8FAFC]';
+  document.getElementById('hist-tab-starred').className = tab === 'starred' ? 'px-2.5 py-1 rounded-lg bg-[#4F8CFF]/20 text-[#4F8CFF] font-semibold' : 'px-2.5 py-1 rounded-lg bg-[#121827] text-[#94A3B8] hover:text-[#F8FAFC]';
   loadHistory();
 }
 
@@ -1209,7 +1558,7 @@ function toggleHistoryDrawer() {
 }
 
 // -------------------------------------------------------------
-// 12. User Profile & Settings Modal
+// 14. Profile & Preferences Modal (Organized Sections)
 // -------------------------------------------------------------
 function openProfileModal(scrollTarget = null) {
   const modal = document.getElementById('profile-modal-backdrop');
@@ -1230,9 +1579,8 @@ function closeProfileModal() {
 }
 
 function populateProfileModalFields() {
-  if (!state.profile) return;
-  
   const nameInput = document.getElementById('profile-name-input');
+  const emailDisplay = document.getElementById('profile-email-display');
   const keyInput = document.getElementById('profile-api-key-input');
   const autoSpeakToggle = document.getElementById('profile-autospeak-toggle');
   const speechRateSlider = document.getElementById('profile-speech-rate');
@@ -1242,27 +1590,29 @@ function populateProfileModalFields() {
   const toneSelect = document.getElementById('profile-tone-select');
   const keyStatus = document.getElementById('profile-key-status');
 
-  if (nameInput) nameInput.value = state.profile.name || '';
-  if (keyInput) keyInput.value = state.profile.custom_api_key || '';
-  if (autoSpeakToggle) autoSpeakToggle.checked = Boolean(state.profile.auto_speak);
-  if (speechRateSlider) speechRateSlider.value = state.profile.speech_rate || 1.0;
-  if (rateLabel) rateLabel.textContent = `${state.profile.speech_rate || 1.0}x`;
-  if (nativeSelect) nativeSelect.value = state.profile.native_language || 'en';
-  if (targetSelect) targetSelect.value = state.profile.default_target || 'es';
-  if (toneSelect) toneSelect.value = state.profile.tone || 'natural';
+  if (nameInput) nameInput.value = state.user?.name || state.profile?.name || '';
+  if (emailDisplay) emailDisplay.value = state.user?.email || '';
+  if (keyInput) keyInput.value = state.profile?.custom_api_key || '';
+  if (autoSpeakToggle) autoSpeakToggle.checked = Boolean(state.profile?.auto_speak);
+  if (speechRateSlider) speechRateSlider.value = state.profile?.speech_rate || 1.0;
+  if (rateLabel) rateLabel.textContent = `${state.profile?.speech_rate || 1.0}x`;
+  if (nativeSelect) nativeSelect.value = state.profile?.native_language || 'en';
+  if (targetSelect) targetSelect.value = state.profile?.default_target || 'es';
+  if (toneSelect) toneSelect.value = state.profile?.tone || 'natural';
 
-  selectAvatar(state.profile.avatar || 'astronaut', AVATAR_MAP[state.profile.avatar] || '🚀');
+  const avatarKey = state.profile?.avatar || state.user?.avatar || 'astronaut';
+  selectAvatar(avatarKey, AVATAR_MAP[avatarKey] || '🚀');
 
   if (keyStatus) {
-    if (state.profile.custom_api_key) {
+    if (state.profile?.has_custom_key) {
       keyStatus.textContent = 'Custom Key Configured';
-      keyStatus.className = 'text-[11px] font-mono px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300';
+      keyStatus.className = 'text-[11px] font-mono px-2 py-0.5 rounded-md bg-[#4F8CFF]/15 text-[#4F8CFF]';
     } else if (state.config?.env_key_present) {
-      keyStatus.textContent = 'System GEMINI_API_KEY Active';
-      keyStatus.className = 'text-[11px] font-mono px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300';
+      keyStatus.textContent = 'System Gemini 3.8 Active';
+      keyStatus.className = 'text-[11px] font-mono px-2 py-0.5 rounded-md bg-[#22C55E]/15 text-[#22C55E]';
     } else {
       keyStatus.textContent = 'No Key Configured';
-      keyStatus.className = 'text-[11px] font-mono px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300';
+      keyStatus.className = 'text-[11px] font-mono px-2 py-0.5 rounded-md bg-[#F59E0B]/15 text-[#F59E0B]';
     }
   }
 }
@@ -1292,7 +1642,7 @@ function toggleKeyVisibility() {
 async function testApiKeyButton() {
   const key = document.getElementById('profile-api-key-input')?.value?.trim() || '';
   const btn = document.getElementById('test-key-btn');
-  btn.innerHTML = `<span class="animate-spin inline-block w-3.5 h-3.5 border-2 border-purple-400 border-t-transparent rounded-full mr-1"></span> Testing...`;
+  btn.innerHTML = `<span class="animate-spin inline-block w-3.5 h-3.5 border-2 border-[#4F8CFF] border-t-transparent rounded-full mr-1"></span> Testing...`;
 
   try {
     const res = await fetch('/api/test-key', {
@@ -1301,16 +1651,17 @@ async function testApiKeyButton() {
       body: JSON.stringify({ api_key: key })
     });
     const data = await res.json();
-    btn.innerHTML = `<i data-lucide="shield-check" class="w-3.5 h-3.5 mr-1"></i> Tested`;
+    btn.innerHTML = `<i data-lucide="shield-check" class="w-3.5 h-3.5 mr-1 text-[#22D3EE]"></i> Test Connection`;
     initLucide();
 
     if (data.valid) {
-      showToast(`Success: ${data.message}`, 'success');
+      showToast(`Connection Verified: ${data.message}`, 'success');
+      updateOnlineStatus();
     } else {
       showToast(`Key Error: ${data.message}`, 'error');
     }
   } catch (err) {
-    btn.innerHTML = `<i data-lucide="shield-check" class="w-3.5 h-3.5 mr-1"></i> Test Key`;
+    btn.innerHTML = `<i data-lucide="shield-check" class="w-3.5 h-3.5 mr-1 text-[#22D3EE]"></i> Test Connection`;
     initLucide();
     showToast('Failed to reach validation service', 'error');
   }
@@ -1318,7 +1669,7 @@ async function testApiKeyButton() {
 
 async function saveProfileChanges() {
   const updatedData = {
-    name: document.getElementById('profile-name-input')?.value?.trim() || 'Cosmic Voyager',
+    name: document.getElementById('profile-name-input')?.value?.trim() || state.user?.name || 'User',
     avatar: selectedAvatarKey,
     native_language: document.getElementById('profile-native-lang')?.value || 'en',
     default_target: document.getElementById('profile-target-lang')?.value || 'es',
@@ -1338,8 +1689,12 @@ async function saveProfileChanges() {
     const data = await res.json();
     if (data.success) {
       state.profile = data.profile;
+      if (state.user) {
+        state.user.name = updatedData.name;
+        state.user.avatar = updatedData.avatar;
+      }
       updateUIFromProfile();
-      updateEngineBadge();
+      updateOnlineStatus();
       closeProfileModal();
       showToast('Profile and preferences updated successfully!', 'success');
     }
@@ -1350,7 +1705,7 @@ async function saveProfileChanges() {
 }
 
 // -------------------------------------------------------------
-// 13. File Audio Upload
+// 15. File Audio Upload
 // -------------------------------------------------------------
 async function handleAudioUpload(inputElem) {
   if (!inputElem.files || !inputElem.files[0]) return;
@@ -1389,7 +1744,7 @@ async function handleAudioUpload(inputElem) {
 }
 
 // -------------------------------------------------------------
-// 14. Clipboard & Toast Notifications
+// 16. Clipboard & Toast Notifications
 // -------------------------------------------------------------
 function copyTranslation() {
   const text = state.currentTranslation?.translated_text;
@@ -1422,12 +1777,12 @@ function showToast(message, type = 'info') {
 
   const toast = document.createElement('div');
   const bgStyles = {
-    success: 'bg-emerald-950/90 border-emerald-500/40 text-emerald-200',
-    error: 'bg-rose-950/90 border-rose-500/40 text-rose-200',
-    info: 'bg-purple-950/90 border-purple-500/40 text-purple-200',
-  }[type] || 'bg-slate-900/90 border-slate-700 text-slate-200';
+    success: 'bg-[#0F1422] border-[#22C55E]/40 text-[#22C55E]',
+    error: 'bg-[#0F1422] border-[#EF4444]/40 text-[#EF4444]',
+    info: 'bg-[#0F1422] border-[#4F8CFF]/40 text-[#4F8CFF]',
+  }[type] || 'bg-[#0F1422] border-[#263149] text-[#F8FAFC]';
 
-  toast.className = `p-3.5 rounded-2xl border backdrop-blur-xl shadow-2xl flex items-center space-x-2 text-xs font-medium toast-enter pointer-events-auto ${bgStyles}`;
+  toast.className = `p-3.5 rounded-2xl border backdrop-blur-xl shadow-2xl flex items-center space-x-2 text-xs font-semibold toast-enter pointer-events-auto ${bgStyles}`;
   toast.innerHTML = `<span>${message}</span>`;
 
   container.appendChild(toast);
