@@ -11,6 +11,13 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- PWA Manifest & App Icons -->
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/svg+xml" href="/static/icons/icon.svg">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <meta name="theme-color" content="#080B14">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="/static/css/style.css">
   <script>
     tailwind.config = {
@@ -81,7 +88,7 @@
             <div>
               <div class="flex items-center justify-between mb-1.5">
                 <label class="block text-xs font-semibold text-[#94A3B8]">Password</label>
-                <button type="button" onclick="showForgotPasswordModal()" class="text-xs text-[#4F8CFF] hover:text-[#6AA1FF] transition-colors">Forgot password?</button>
+                <span class="text-[11px] text-[#64748B]">Standalone Instance</span>
               </div>
               <div class="relative">
                 <input type="password" id="login-password" required placeholder="••••••••" class="w-full bg-[#0F1422] border border-[#263149] rounded-xl px-3.5 py-2.5 text-sm text-[#F8FAFC] placeholder-[#64748B] focus:border-[#4F8CFF] pr-10 transition-all">
@@ -98,7 +105,11 @@
             </button>
           </form>
 
-          <div class="mt-6 text-center text-xs text-[#94A3B8]">
+          <p class="mt-4 text-[11px] text-center text-[#64748B] leading-relaxed">
+            Note: Password recovery is not configured on this standalone instance. Please contact your system administrator or register a new account.
+          </p>
+
+          <div class="mt-4 text-center text-xs text-[#94A3B8]">
             Don't have an account? 
             <button type="button" onclick="switchAuthMode('signup')" class="text-[#4F8CFF] hover:text-[#6AA1FF] font-semibold transition-colors">Sign Up</button>
           </div>
@@ -162,10 +173,10 @@
     
     <!-- Top Header -->
     <header class="border-b border-[#263149] bg-[#080B14]/90 backdrop-blur-md sticky top-0 z-30">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
         
         <!-- Brand Logo & Clean Subtitle (No AI Badge) -->
-        <div class="flex items-center space-x-3">
+        <div class="flex items-center space-x-3 shrink-0">
           <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-[#4F8CFF] to-[#22D3EE] flex items-center justify-center shadow-md shadow-[#4F8CFF]/20">
             <i data-lucide="languages" class="w-5 h-5 text-white"></i>
           </div>
@@ -175,29 +186,35 @@
           </div>
         </div>
 
-        <!-- Center: Mode Selector Tabs -->
-        <nav class="hidden md:flex items-center p-1 bg-[#0F1422] border border-[#263149] rounded-xl">
-          <button id="nav-mode-translate" onclick="switchMode('translate')" class="mode-tab active px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-2 transition-all">
+        <!-- Center: Mode Selector Tabs (Mobile & Desktop Accessible) -->
+        <nav class="flex items-center p-1 bg-[#0F1422] border border-[#263149] rounded-xl overflow-x-auto max-w-[200px] sm:max-w-none scrollbar-none">
+          <button id="nav-mode-translate" onclick="switchMode('translate')" class="mode-tab active px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 sm:space-x-2 transition-all shrink-0">
             <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
-            <span>Translate</span>
+            <span class="hidden sm:inline">Translate</span>
           </button>
-          <button id="nav-mode-dialogue" onclick="switchMode('dialogue')" class="mode-tab px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-2 transition-all text-[#94A3B8] hover:text-[#F8FAFC]">
+          <button id="nav-mode-dialogue" onclick="switchMode('dialogue')" class="mode-tab px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 sm:space-x-2 transition-all text-[#94A3B8] hover:text-[#F8FAFC] shrink-0">
             <i data-lucide="messages-square" class="w-3.5 h-3.5"></i>
-            <span>Conversation</span>
+            <span class="hidden sm:inline">Conversation</span>
           </button>
-          <button id="nav-mode-voice" onclick="switchMode('voice')" class="mode-tab px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-2 transition-all text-[#94A3B8] hover:text-[#F8FAFC]">
+          <button id="nav-mode-voice" onclick="switchMode('voice')" class="mode-tab px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 sm:space-x-2 transition-all text-[#94A3B8] hover:text-[#F8FAFC] shrink-0">
             <i data-lucide="mic" class="w-3.5 h-3.5"></i>
-            <span>Voice Studio</span>
+            <span class="hidden sm:inline">Voice Studio</span>
           </button>
         </nav>
 
-        <!-- Right: Dynamic Status Indicator, History, Profile -->
-        <div class="flex items-center space-x-2 sm:space-x-3">
+        <!-- Right: Dynamic Status Indicator, PWA Install, History, Profile -->
+        <div class="flex items-center space-x-1.5 sm:space-x-3 shrink-0">
           
-          <!-- Dynamic Status Badge (Online / Offline / Error) -->
-          <div id="engine-status-badge" class="flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-[#0F1422] border border-[#263149] text-xs font-medium" title="Connection Status">
-            <span id="engine-status-dot" class="w-2 h-2 rounded-full bg-[#22C55E]"></span>
-            <span id="engine-status-text" class="text-xs text-[#94A3B8]">Gemini 3.8 Flash · Online</span>
+          <!-- PWA Install Button (Available when browser supports installation) -->
+          <button id="pwa-install-btn" onclick="installPWA()" class="hidden btn-secondary px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center space-x-1.5 text-[#22D3EE] border-[#22D3EE]/30 hover:border-[#22D3EE]" title="Install OmniTranslate App">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i>
+            <span class="hidden md:inline">Install</span>
+          </button>
+
+          <!-- Dynamic Status Badge (Gemini · Connected / Checking / Unavailable / Offline) -->
+          <div id="engine-status-badge" class="flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-[#0F1422] border border-[#263149] text-xs font-medium cursor-pointer" onclick="updateOnlineStatus()" title="Connection Status (Click to Refresh)">
+            <span id="engine-status-dot" class="w-2 h-2 rounded-full bg-[#F59E0B] animate-pulse"></span>
+            <span id="engine-status-text" class="text-xs text-[#94A3B8]">Gemini · Checking</span>
           </div>
 
           <!-- History Drawer Button -->
@@ -206,17 +223,23 @@
           </button>
 
           <!-- Profile & Settings Button (Displays Authenticated User Name) -->
-          <button onclick="openProfileModal()" class="btn-secondary flex items-center space-x-2 p-1.5 pl-2 pr-2.5 rounded-xl" title="Profile & Preferences">
+          <button onclick="openProfileModal()" class="btn-secondary flex items-center space-x-1.5 sm:space-x-2 p-1.5 pl-2 pr-2.5 rounded-xl" title="Profile & Preferences">
             <div id="nav-avatar" class="w-6 h-6 rounded-lg bg-[#4F8CFF]/20 text-[#4F8CFF] flex items-center justify-center text-xs font-bold">
               🚀
             </div>
-            <span id="nav-username" class="text-xs font-semibold max-w-[90px] sm:max-w-[120px] truncate text-[#F8FAFC]">User</span>
+            <span id="nav-username" class="text-xs font-semibold max-w-[70px] sm:max-w-[120px] truncate text-[#F8FAFC]">User</span>
             <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-[#94A3B8]"></i>
           </button>
         </div>
 
       </div>
     </header>
+
+    <!-- Offline Notification Banner (Shown when internet is unavailable) -->
+    <div id="offline-banner" class="hidden bg-[#0F1422] border-b border-[#F59E0B]/30 px-4 py-2 text-center text-xs text-[#F59E0B] flex items-center justify-center space-x-2">
+      <i data-lucide="wifi-off" class="w-4 h-4 shrink-0"></i>
+      <span><strong>Offline Mode</strong>: You can draft and edit text locally. Online Gemini translation requires an active connection.</span>
+    </div>
 
     <!-- Main Container -->
     <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col">

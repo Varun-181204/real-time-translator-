@@ -68,6 +68,13 @@ def service_worker():
         return send_file(sw_path, mimetype="application/javascript")
     return Response("// Service worker disabled", mimetype="application/javascript")
 
+@app.route("/manifest.json")
+def manifest():
+    manifest_path = os.path.join(BASE_DIR, "static", "manifest.json")
+    if os.path.exists(manifest_path):
+        return send_file(manifest_path, mimetype="application/manifest+json")
+    return Response("{}", mimetype="application/manifest+json")
+
 # -------------------------------------------------------------
 # System Status & Health Check (Real Connection State)
 # -------------------------------------------------------------

@@ -68,6 +68,20 @@ select option:focus {
   color: #ffffff !important;
 }
 
+/* Accessible Focus Rings */
+*:focus-visible {
+  outline: 2px solid var(--focus-border) !important;
+  outline-offset: 2px;
+}
+
+select optgroup {
+  font-weight: 700;
+  color: var(--primary-blue) !important;
+  background-color: var(--card-bg) !important;
+  padding: 8px 10px;
+  font-style: normal;
+}
+
 /* Inputs */
 input, textarea {
   color-scheme: dark;
@@ -351,4 +365,12 @@ input:focus, textarea:focus, select:focus {
     align-self: center;
     margin: 4px 0;
   }
+  button, .btn-primary, .btn-secondary, select {
+    min-height: 38px;
+  }
+  header {
+    padding-left: 0.25rem;
+    padding-right: 0.25rem;
+  }
 }
+

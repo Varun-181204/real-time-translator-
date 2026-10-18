@@ -28,6 +28,7 @@ const state = {
   continuousVoiceActive: false,
   historyFilter: 'all', // 'all', 'starred'
   historyItems: [],
+  isTranslating: false,
 };
 
 // Avatar preset mapping
@@ -361,41 +362,46 @@ async function updateOnlineStatus() {
   const badge = document.getElementById('engine-status-badge');
   const dot = document.getElementById('engine-status-dot');
   const text = document.getElementById('engine-status-text');
+  const offlineBanner = document.getElementById('offline-banner');
   if (!badge || !dot || !text) return;
 
   // 1. Browser offline state
   if (!navigator.onLine) {
     text.textContent = 'Offline';
     dot.className = 'w-2 h-2 rounded-full bg-[#64748B]';
-    badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-[#0F1422] border border-[#263149] text-xs font-medium text-[#94A3B8]';
-    badge.title = 'No internet connection detected';
+    badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-[#0F1422] border border-[#263149] text-xs font-medium text-[#94A3B8] cursor-pointer';
+    badge.title = 'Offline — No internet connection detected';
+    if (offlineBanner) offlineBanner.classList.remove('hidden');
     return;
   }
 
-  // 2. Dynamic server & AI connection health check
+  // 2. Hide offline banner when online
+  if (offlineBanner) offlineBanner.classList.add('hidden');
+
+  // 3. Temporary checking state
+  text.textContent = 'Gemini · Checking';
+  dot.className = 'w-2 h-2 rounded-full bg-[#F59E0B] animate-pulse';
+
+  // 4. Dynamic server & AI connection health check
   try {
     const res = await fetch('/api/health');
     const data = await res.json();
 
-    if (res.ok && data.status === 'online') {
-      if (state.profile?.has_custom_key) {
-        text.textContent = 'Custom Gemini Key · Online';
-      } else {
-        text.textContent = 'Gemini 3.8 Flash · Online';
-      }
+    if (res.ok && data.status === 'online' && data.gemini_connected) {
+      text.textContent = 'Gemini · Connected';
       dot.className = 'w-2 h-2 rounded-full bg-[#22C55E]';
-      badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-[#0F1422] border border-[#263149] text-xs font-medium text-[#F8FAFC]';
-      badge.title = 'Gemini AI service connected and ready';
+      badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-[#0F1422] border border-[#263149] text-xs font-medium text-[#F8FAFC] cursor-pointer';
+      badge.title = 'Gemini AI provider connected and active (Click to refresh)';
     } else {
-      text.textContent = 'Translation service unavailable';
+      text.textContent = 'Gemini · Unavailable';
       dot.className = 'w-2 h-2 rounded-full bg-[#EF4444]';
-      badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-[#0F1422] border border-[#EF4444]/30 text-xs font-medium text-[#EF4444]';
-      badge.title = 'AI translation backend unavailable';
+      badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-[#0F1422] border border-[#EF4444]/30 text-xs font-medium text-[#EF4444] cursor-pointer';
+      badge.title = 'Gemini AI provider unavailable';
     }
   } catch (err) {
-    text.textContent = 'Translation service unavailable';
+    text.textContent = 'Gemini · Unavailable';
     dot.className = 'w-2 h-2 rounded-full bg-[#EF4444]';
-    badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-[#0F1422] border border-[#EF4444]/30 text-xs font-medium text-[#EF4444]';
+    badge.className = 'flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-[#0F1422] border border-[#EF4444]/30 text-xs font-medium text-[#EF4444] cursor-pointer';
     badge.title = 'Could not reach server';
   }
 }
@@ -439,6 +445,8 @@ function updateUIFromProfile() {
 // -------------------------------------------------------------
 // 4. Language Selectors & Tone Configuration
 // -------------------------------------------------------------
+const POPULAR_LANG_CODES = ['en', 'es', 'fr', 'de', 'hi', 'ja', 'zh', 'ar', 'pt', 'it', 'ru', 'ko'];
+
 function populateLanguageSelects() {
   if (!state.config?.languages) return;
   const langs = state.config.languages;
@@ -450,24 +458,46 @@ function populateLanguageSelects() {
   const profNative = document.getElementById('profile-native-lang');
   const profTarget = document.getElementById('profile-target-lang');
 
-  const populate = (elem, includeAuto = false) => {
+  const populateGrouped = (elem, includeAuto = false) => {
     if (!elem) return;
     elem.innerHTML = '';
+
+    if (includeAuto) {
+      const autoOpt = document.createElement('option');
+      autoOpt.value = 'auto';
+      autoOpt.textContent = '🌐 Auto Detect';
+      elem.appendChild(autoOpt);
+    }
+
+    const popularGroup = document.createElement('optgroup');
+    popularGroup.label = 'Popular Languages';
+
+    const allGroup = document.createElement('optgroup');
+    allGroup.label = 'All Languages';
+
     langs.forEach(lang => {
-      if (lang.code === 'auto' && !includeAuto) return;
+      if (lang.code === 'auto') return;
       const opt = document.createElement('option');
       opt.value = lang.code;
       opt.textContent = `${lang.flag} ${lang.name}`;
-      elem.appendChild(opt);
+
+      if (POPULAR_LANG_CODES.includes(lang.code)) {
+        popularGroup.appendChild(opt);
+      } else {
+        allGroup.appendChild(opt);
+      }
     });
+
+    if (popularGroup.children.length > 0) elem.appendChild(popularGroup);
+    if (allGroup.children.length > 0) elem.appendChild(allGroup);
   };
 
-  populate(srcSelect, true);
-  populate(tgtSelect, false);
-  populate(dlg1, false);
-  populate(dlg2, false);
-  populate(profNative, false);
-  populate(profTarget, false);
+  populateGrouped(srcSelect, true);
+  populateGrouped(tgtSelect, false);
+  populateGrouped(dlg1, false);
+  populateGrouped(dlg2, false);
+  populateGrouped(profNative, false);
+  populateGrouped(profTarget, false);
 
   if (tgtSelect) tgtSelect.value = state.targetLang || 'es';
   if (dlg1) dlg1.value = 'en';
@@ -539,8 +569,17 @@ function highlightActiveTonePill() {
 function setupEventListeners() {
   const sourceInput = document.getElementById('source-input');
   if (sourceInput) {
+    // Restore unsent draft across temporary connection loss or reload
+    const savedDraft = localStorage.getItem('omnitranslate_draft');
+    if (!sourceInput.value.trim() && savedDraft) {
+      sourceInput.value = savedDraft;
+      updateSourceCharAndWordCount();
+    }
+
     sourceInput.addEventListener('input', () => {
       updateSourceCharAndWordCount();
+      // Auto-save draft locally for offline resilience
+      localStorage.setItem('omnitranslate_draft', sourceInput.value);
     });
 
     // Keyboard shortcut: Ctrl + Enter to translate
@@ -620,6 +659,9 @@ function switchMode(mode) {
 // 7. Translation Logic (With Offline Safeguards)
 // -------------------------------------------------------------
 async function triggerTranslation(customText = null, overrideTarget = null, overrideSource = null) {
+  // Prevent accidental duplicate requests while in flight
+  if (state.isTranslating) return;
+
   // Offline verification
   if (!navigator.onLine) {
     showToast("You're offline. Reconnect to the internet to use Gemini translation.", 'error');
@@ -650,6 +692,7 @@ async function triggerTranslation(customText = null, overrideTarget = null, over
   const tone = state.activeTone || 'natural';
   const model = state.profile?.model || 'gemini-3.8-flash';
 
+  state.isTranslating = true;
   setTranslationLoading(true);
   setVoiceState('processing', 'Translating with Gemini AI...');
 
@@ -668,14 +711,12 @@ async function triggerTranslation(customText = null, overrideTarget = null, over
     });
 
     if (res.status === 401) {
-      setTranslationLoading(false);
       showToast('Session expired. Please sign in again.', 'error');
       showAuthView();
       return;
     }
 
     const data = await res.json();
-    setTranslationLoading(false);
 
     if (data.success) {
       state.currentTranslation = data;
@@ -692,10 +733,12 @@ async function triggerTranslation(customText = null, overrideTarget = null, over
       showToast(data.error || 'Translation failed', 'error');
     }
   } catch (err) {
-    setTranslationLoading(false);
     setVoiceState('error', 'Network error');
     console.error('Translation request error:', err);
     showToast('Network error during translation', 'error');
+  } finally {
+    state.isTranslating = false;
+    setTranslationLoading(false);
   }
 }
 
@@ -771,6 +814,7 @@ function clearSourceInput() {
   const input = document.getElementById('source-input');
   if (input) {
     input.value = '';
+    localStorage.removeItem('omnitranslate_draft');
     updateSourceCharAndWordCount();
     document.getElementById('detected-lang-pill')?.classList.add('hidden');
     input.focus();
@@ -1793,3 +1837,27 @@ function showToast(message, type = 'info') {
     setTimeout(() => toast.remove(), 300);
   }, 3500);
 }
+
+// -------------------------------------------------------------
+// 17. Progressive Web App (PWA) Install Experience
+// -------------------------------------------------------------
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  const btn = document.getElementById('pwa-install-btn');
+  if (btn) btn.classList.remove('hidden');
+});
+
+async function installPWA() {
+  if (!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  const { outcome } = await deferredInstallPrompt.userChoice;
+  if (outcome === 'accepted') {
+    const btn = document.getElementById('pwa-install-btn');
+    if (btn) btn.classList.add('hidden');
+    showToast('OmniTranslate installed successfully!', 'success');
+  }
+  deferredInstallPrompt = null;
+}
+

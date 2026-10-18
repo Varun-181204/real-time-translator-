@@ -1,20 +1,26 @@
 /**
  * OmniTranslate Service Worker
- * Provides offline caching for static shell and graceful offline fallback.
+ * Version: omnitranslate-v2
+ * Provides secure offline caching for static app shell and graceful offline fallback.
  */
 
-const CACHE_NAME = 'omnitranslate-v1';
+const CACHE_NAME = 'omnitranslate-v2';
 const STATIC_ASSETS = [
   '/',
+  '/manifest.json',
+  '/static/manifest.json',
   '/static/css/style.css',
   '/static/js/app.js',
+  '/static/icons/icon.svg',
+  '/static/icons/icon-192.png',
+  '/static/icons/icon-512.png'
 ];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.addAll(STATIC_ASSETS).catch((err) => {
-        console.warn('Service worker asset cache partial fail:', err);
+        console.warn('Service worker pre-caching partial notice:', err);
       });
     })
   );
@@ -35,7 +41,12 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Do not cache API translation calls or authentication calls
+  // Never cache POST, PUT, DELETE, or non-GET requests
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
+  // Handle API calls dynamically - NEVER cache private or authenticated user data in service worker
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
       fetch(event.request).catch(() => {
@@ -51,6 +62,20 @@ self.addEventListener('fetch', (event) => {
             }
           );
         }
+        if (url.pathname === '/api/health') {
+          return new Response(
+            JSON.stringify({
+              status: "offline",
+              service: "Gemini 3.8 Flash",
+              gemini_connected: false,
+              offline: true
+            }),
+            {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' }
+            }
+          );
+        }
         return new Response(
           JSON.stringify({ error: "Offline network request failed", offline: true }),
           { status: 503, headers: { 'Content-Type': 'application/json' } }
@@ -60,7 +85,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Stale-while-revalidate for static shell assets
+  // Stale-while-revalidate for safe static shell assets
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       const fetchPromise = fetch(event.request).then((networkResponse) => {

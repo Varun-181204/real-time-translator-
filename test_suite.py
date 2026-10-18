@@ -18,11 +18,22 @@ def test_full_pipeline():
     assert health_data["status"] == "online"
     print("[PASS] 1. Health check endpoint online")
 
-    # 2. Service Worker route
+    # 2. Service Worker & Manifest routes
     res = client.get("/sw.js")
     assert res.status_code == 200
     assert "javascript" in res.headers.get("Content-Type", "")
-    print("[PASS] 2. Service Worker route (/sw.js) accessible")
+    
+    res = client.get("/manifest.json")
+    assert res.status_code == 200
+    manifest_data = res.get_json()
+    assert manifest_data.get("short_name") == "OmniTranslate"
+    assert len(manifest_data.get("icons", [])) >= 2
+
+    res = client.get("/static/icons/icon-192.png")
+    assert res.status_code == 200
+    assert len(res.data) > 0
+
+    print("[PASS] 2. Service Worker, PWA Manifest & App Icons verified")
 
     # 3. Unauthenticated /api/auth/me
     res = client.get("/api/auth/me")
@@ -161,8 +172,15 @@ def test_full_pipeline():
     assert res.get_json()["user"]["name"] == "Sarah Connor"
     print("[PASS] 14. Login with correct credentials succeeded and restored user name & profile")
 
+    # 15. Text-to-Speech (TTS) audio generation
+    res = client.get("/api/tts?text=Hola+mundo&lang=es")
+    assert res.status_code == 200
+    assert "audio/mpeg" in res.headers.get("Content-Type", "")
+    assert len(res.data) > 100
+    print("[PASS] 15. Text-to-speech MP3 synthesis verified")
+
     print("\n========================================")
-    print(" ALL 14 TEST SUITE CHECKS PASSED PERFECTLY!")
+    print(" ALL 15 TEST SUITE CHECKS PASSED PERFECTLY!")
     print("========================================")
 
 if __name__ == "__main__":
