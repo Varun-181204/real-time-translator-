@@ -87,9 +87,9 @@ def health_check():
     
     return jsonify({
         "status": "online",
-        "service": "Gemini 3.8 Flash",
+        "service": "Gemini 2.5 Flash",
         "gemini_connected": bool(env_key_present or has_user_key),
-        "model": "gemini-3.8-flash"
+        "model": "gemini-2.5-flash"
     })
 
 # -------------------------------------------------------------
@@ -210,21 +210,34 @@ def translate_text():
     target_lang = data.get("target_lang", "es")
     source_lang = data.get("source_lang", "auto")
     tone = data.get("tone", "natural")
-    model = data.get("model", "gemini-3.8-flash")
+    model = data.get("model", "gemini-2.5-flash")
     save_to_history = data.get("save_history", True)
 
     # Server securely retrieves raw custom key if user configured one
     raw_user_key = get_raw_custom_api_key(user_id)
     custom_api_key = raw_user_key or None
 
-    result = translate_with_gemini(
-        text=text,
-        target_lang=target_lang,
-        source_lang=source_lang,
-        tone=tone,
-        model=model,
-        custom_api_key=custom_api_key,
-    )
+    try:
+        result = translate_with_gemini(
+            text=text,
+            target_lang=target_lang,
+            source_lang=source_lang,
+            tone=tone,
+            model=model,
+            custom_api_key=custom_api_key,
+        )
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "translated_text": "",
+            "detected_source_lang": source_lang,
+            "pronunciation": "",
+            "nuance_note": "",
+            "engine": "Gemini",
+            "tone": tone,
+            "error": f"Server translation error: {str(e)}",
+            "history_id": None
+        }), 500
 
     history_id = None
     if result.get("success") and save_to_history and result.get("translated_text"):

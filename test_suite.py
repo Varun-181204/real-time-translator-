@@ -179,8 +179,70 @@ def test_full_pipeline():
     assert len(res.data) > 100
     print("[PASS] 15. Text-to-speech MP3 synthesis verified")
 
+    # 16. Client timeout & single-attempt retry configuration
+    from engine import (
+        get_gemini_client,
+        translate_with_gemini,
+        test_api_key,
+        format_gemini_error,
+        DEFAULT_GEMINI_TIMEOUT_MS,
+        FALLBACK_MODEL
+    )
+    from unittest.mock import patch, MagicMock
+
+    gem_client, gem_err = get_gemini_client(timeout_ms=10000, max_attempts=1)
+    assert gem_client is not None, f"Client init failed: {gem_err}"
+    assert gem_client._api_client._http_options.timeout == 10000
+    assert gem_client._api_client._http_options.retry_options.attempts == 1
+    print("[PASS] 16. Supported explicit timeout (10000ms) & single attempt retry verified on google-genai client")
+
+    # 17. Error message formatting for Gemini errors
+    timeout_msg = format_gemini_error("ServerError: 504 DEADLINE_EXCEEDED. Operation timed out.")
+    assert "timed out" in timeout_msg.lower()
+    quota_msg = format_gemini_error("429 RESOURCE_EXHAUSTED. Quota exceeded.")
+    assert "quota" in quota_msg.lower() or "rate limit" in quota_msg.lower()
+    print("[PASS] 17. Gemini technical errors cleanly mapped to helpful user messages")
+
+    # 18. Timeout simulation and fallback handling (no deep-translator hang)
+    mock_client = MagicMock()
+    mock_client.models.generate_content.side_effect = Exception("504 DEADLINE_EXCEEDED. Deadline expired.")
+    with patch("engine.get_gemini_client", return_value=(mock_client, None)):
+        timeout_res = translate_with_gemini("Test text", "es", model="gemini-2.5-flash")
+        assert timeout_res["success"] is False
+        assert "timed out" in timeout_res["error"].lower()
+        # Verify single attempt when model is fallback model (no duplicate attempt)
+        assert mock_client.models.generate_content.call_count == 1
+    print("[PASS] 18. Gemini timeout returns clear error without hanging, avoiding duplicate attempts")
+
+    # 19. Sensible fallback when requested model fails
+    mock_client2 = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.text = '{"translated_text": "Prueba exitosa", "detected_source_lang": "en", "pronunciation": "", "nuance_note": "", "detected_tone": "natural"}'
+    mock_client2.models.generate_content.side_effect = [
+        Exception("503 UNAVAILABLE. Model experiencing high demand."),
+        mock_resp
+    ]
+    with patch("engine.get_gemini_client", return_value=(mock_client2, None)):
+        fallback_res = translate_with_gemini("Test text", "es", model="gemini-3.8-flash")
+        assert fallback_res["success"] is True
+        assert fallback_res["translated_text"] == "Prueba exitosa"
+        assert "gemini-2.5-flash" in fallback_res["engine"]
+        assert mock_client2.models.generate_content.call_count == 2
+    print("[PASS] 19. Automatic fallback from failing model to gemini-2.5-flash verified")
+
+    # 20. Translation endpoint error contracts (empty text & unconfigured key)
+    res = client.post("/api/translate", json={"text": "   ", "target_lang": "es"})
+    assert res.status_code == 400
+    assert res.get_json()["error"] == "No text provided"
+    print("[PASS] 20. Endpoint error response contract verified (HTTP 400 with clean error JSON)")
+
+    # 21. API Key testing with timeout
+    invalid_key_res = test_api_key("AIzaSyInvalidKeyTest1234567890")
+    assert invalid_key_res["valid"] is False
+    print(f"[PASS] 21. API Key verification safely tested with timeout (rejected invalid key)")
+
     print("\n========================================")
-    print(" ALL 15 TEST SUITE CHECKS PASSED PERFECTLY!")
+    print(" ALL 21 TEST SUITE CHECKS PASSED PERFECTLY!")
     print("========================================")
 
 if __name__ == "__main__":

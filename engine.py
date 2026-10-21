@@ -1,23 +1,64 @@
 import os
+import re
 import json
 import tempfile
 from typing import Dict, Any, Optional
 from google import genai
+from google.genai import types
 from config import TRANSLATION_TONES, SUPPORTED_LANGUAGES
 
-def get_gemini_client(custom_api_key: Optional[str] = None):
-    """Obtains a Gemini Client using custom key, or env variables."""
+# Explicit supported timeout: 10,000 milliseconds (10 seconds)
+DEFAULT_GEMINI_TIMEOUT_MS = int(os.environ.get("GEMINI_TIMEOUT_MS", 10000))
+FALLBACK_MODEL = "gemini-2.5-flash"
+
+def format_gemini_error(error_str: str) -> str:
+    """Formats Gemini API errors into helpful user-facing messages."""
+    if not error_str:
+        return "Translation failed: No response received from translation engine."
+    err_lower = error_str.lower()
+    if "deadline_exceeded" in err_lower or "timed out" in err_lower or "timeout" in err_lower:
+        return "Translation request timed out. The AI model took too long to respond. Please try again."
+    if "resource_exhausted" in err_lower or "429" in err_lower or "quota" in err_lower:
+        return "Gemini API rate limit or quota exceeded. Please try again in a moment or add a custom API key in Profile."
+    if "unavailable" in err_lower or "503" in err_lower:
+        return "Gemini AI model is temporarily experiencing high demand. Please try again shortly."
+    if "api_key_invalid" in err_lower or "api key not valid" in err_lower or "invalid api key" in err_lower:
+        return "Invalid Gemini API key. Please check your API key in Profile settings."
+    if "permission_denied" in err_lower or "403" in err_lower:
+        return "Access denied for Gemini API. Please check your API key permissions."
+    # Extract clean message if present in API error payload
+    try:
+        match = re.search(r"'message':\s*'([^']+)'", error_str)
+        if match:
+            return f"Gemini error: {match.group(1)}"
+    except Exception:
+        pass
+    clean = error_str.strip()
+    if len(clean) > 200:
+        clean = clean[:200] + "..."
+    return f"Translation error: {clean}"
+
+def get_gemini_client(
+    custom_api_key: Optional[str] = None,
+    timeout_ms: int = DEFAULT_GEMINI_TIMEOUT_MS,
+    max_attempts: int = 1
+):
+    """Obtains a Gemini Client with explicit HTTP timeout and retry options."""
     key = custom_api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not key:
         return None, "No API key configured"
     try:
-        client = genai.Client(api_key=key.strip())
+        http_options = types.HttpOptions(
+            timeout=timeout_ms,
+            retry_options=types.HttpRetryOptions(attempts=max_attempts)
+        )
+        client = genai.Client(api_key=key.strip(), http_options=http_options)
         return client, None
     except Exception as e:
         return None, str(e)
 
 def test_api_key(api_key: str) -> Dict[str, Any]:
-    """Tests if a provided Gemini API key is valid."""
+    """Tests if a provided Gemini API key is valid using a fast, bounded check."""
     if not api_key or not api_key.strip():
         # Check if environment key exists
         env_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
@@ -25,41 +66,45 @@ def test_api_key(api_key: str) -> Dict[str, Any]:
             return {"valid": True, "source": "environment", "message": "Using system GEMINI_API_KEY"}
         return {"valid": False, "source": "none", "message": "No API key provided"}
     
+    client, err = get_gemini_client(api_key.strip(), timeout_ms=5000, max_attempts=1)
+    if not client:
+        return {"valid": False, "source": "custom", "message": f"Initialization failed: {err}"}
+
     try:
-        client = genai.Client(api_key=api_key.strip())
         resp = client.models.generate_content(
-            model="gemini-3.8-flash",
-            contents="Say 'OK'"
+            model=FALLBACK_MODEL,
+            contents="Say 'OK'",
+            config=types.GenerateContentConfig(
+                http_options=types.HttpOptions(timeout=5000, retry_options=types.HttpRetryOptions(attempts=1))
+            )
         )
         if resp and resp.text:
             return {"valid": True, "source": "custom", "message": "API Key is valid and active!"}
         return {"valid": False, "source": "custom", "message": "Received empty response from API"}
     except Exception as e:
-        # Try fallback to 2.5-flash
-        try:
-            client = genai.Client(api_key=api_key.strip())
-            resp = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents="Say 'OK'"
-            )
-            if resp and resp.text:
-                return {"valid": True, "source": "custom", "message": "API Key verified with gemini-2.5-flash!"}
-        except Exception:
-            pass
-        return {"valid": False, "source": "custom", "message": f"Validation failed: {str(e)}"}
+        return {"valid": False, "source": "custom", "message": f"Validation failed: {format_gemini_error(str(e))}"}
 
 def translate_with_gemini(
     text: str,
     target_lang: str,
     source_lang: str = "auto",
     tone: str = "natural",
-    model: str = "gemini-3.8-flash",
+    model: str = "gemini-2.5-flash",
     custom_api_key: Optional[str] = None
 ) -> Dict[str, Any]:
     """Translates text using Gemini with intelligent context, pronunciation, and nuance."""
-    client, err = get_gemini_client(custom_api_key)
+    client, err = get_gemini_client(custom_api_key, timeout_ms=DEFAULT_GEMINI_TIMEOUT_MS, max_attempts=1)
     if not client:
-        return translate_fallback(text, target_lang, source_lang, error_note="Gemini API key not configured")
+        return {
+            "success": False,
+            "translated_text": "",
+            "detected_source_lang": source_lang,
+            "pronunciation": "",
+            "nuance_note": "",
+            "engine": "Gemini",
+            "tone": tone,
+            "error": "Gemini API key is not configured. Please add an API key in Profile settings."
+        }
 
     # Find tone instruction
     tone_instruction = "Translate naturally and accurately."
@@ -89,21 +134,29 @@ Provide your response in strictly valid JSON format with the following keys:
 Do NOT wrap in markdown formatting or backticks if possible, return raw JSON.
 """
 
-    # First attempt with requested model, fallback to gemini-2.5-flash if needed
-    models_to_try = [model, "gemini-3.8-flash", "gemini-2.5-flash"]
-    # Deduplicate while preserving order
-    seen = set()
-    models_to_try = [m for m in models_to_try if not (m in seen or seen.add(m))]
+    # Primary model first, followed by sensible fallback if different
+    models_to_try = [model]
+    if FALLBACK_MODEL not in models_to_try:
+        models_to_try.append(FALLBACK_MODEL)
+
+    http_options = types.HttpOptions(
+        timeout=DEFAULT_GEMINI_TIMEOUT_MS,
+        retry_options=types.HttpRetryOptions(attempts=1)
+    )
+    gen_config = types.GenerateContentConfig(
+        http_options=http_options,
+        response_mime_type="application/json"
+    )
 
     last_error = None
     for m in models_to_try:
         try:
             response = client.models.generate_content(
                 model=m,
-                contents=prompt
+                contents=prompt,
+                config=gen_config
             )
-            raw = response.text.strip()
-            # Clean up potential markdown code fences
+            raw = response.text.strip() if response and response.text else ""
             if raw.startswith("```json"):
                 raw = raw[7:]
             elif raw.startswith("```"):
@@ -126,39 +179,30 @@ Do NOT wrap in markdown formatting or backticks if possible, return raw JSON.
             last_error = str(e)
             continue
 
-    # If Gemini failed across all attempts, fallback
-    return translate_fallback(text, target_lang, source_lang, error_note=f"Gemini API error: {last_error}")
+    # If Gemini failed across all attempts, return a clear, useful error without hanging
+    return {
+        "success": False,
+        "translated_text": "",
+        "detected_source_lang": source_lang,
+        "pronunciation": "",
+        "nuance_note": "",
+        "engine": "Gemini",
+        "tone": tone,
+        "error": format_gemini_error(last_error or "Unknown error")
+    }
 
 def translate_fallback(text: str, target_lang: str, source_lang: str = "auto", error_note: str = "") -> Dict[str, Any]:
-    """Fallback translator using deep-translator or direct response."""
-    try:
-        from deep_translator import GoogleTranslator
-        src = "auto" if source_lang == "auto" else source_lang
-        tgt = target_lang
-        # Simple map if code is like zh-CN
-        if tgt.startswith("zh"):
-            tgt = "zh-CN"
-        translated = GoogleTranslator(source=src, target=tgt).translate(text)
-        return {
-            "success": True,
-            "translated_text": translated,
-            "detected_source_lang": source_lang,
-            "pronunciation": "",
-            "nuance_note": "Translated using standard web fallback." + (f" ({error_note})" if error_note else ""),
-            "engine": "Fallback (Google Translator)",
-            "tone": "natural"
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "translated_text": "",
-            "detected_source_lang": source_lang,
-            "pronunciation": "",
-            "nuance_note": f"Translation failed: {error_note or str(e)}",
-            "engine": "None",
-            "tone": "natural",
-            "error": str(e)
-        }
+    """Fallback translator stub - removed from critical path to prevent hanging requests."""
+    return {
+        "success": False,
+        "translated_text": "",
+        "detected_source_lang": source_lang,
+        "pronunciation": "",
+        "nuance_note": "",
+        "engine": "None",
+        "tone": "natural",
+        "error": error_note or "Fallback translation service is disabled to prevent hanging requests. Please verify your Gemini API key."
+    }
 
 def text_to_speech_mp3(text: str, lang: str = "en") -> Optional[bytes]:
     """Converts text to MP3 bytes using gTTS."""

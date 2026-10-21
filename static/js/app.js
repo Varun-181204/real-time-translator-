@@ -690,7 +690,7 @@ async function triggerTranslation(customText = null, overrideTarget = null, over
   const targetLang = overrideTarget || document.getElementById('target-lang-select').value;
   const sourceLang = overrideSource || document.getElementById('source-lang-select').value;
   const tone = state.activeTone || 'natural';
-  const model = state.profile?.model || 'gemini-3.8-flash';
+  const model = state.profile?.model || 'gemini-2.5-flash';
 
   state.isTranslating = true;
   setTranslationLoading(true);
@@ -716,7 +716,22 @@ async function triggerTranslation(customText = null, overrideTarget = null, over
       return;
     }
 
-    const data = await res.json();
+    let data;
+    try {
+      data = await res.json();
+    } catch (parseErr) {
+      const errorMsg = `Server error (${res.status} ${res.statusText || 'Error'})`;
+      setVoiceState('error', 'Server error');
+      showToast(errorMsg, 'error');
+      return;
+    }
+
+    if (!res.ok) {
+      const errorMsg = data?.error || data?.message || `Server error (${res.status})`;
+      setVoiceState('error', 'Server error');
+      showToast(errorMsg, 'error');
+      return;
+    }
 
     if (data.success) {
       state.currentTranslation = data;
@@ -733,9 +748,18 @@ async function triggerTranslation(customText = null, overrideTarget = null, over
       showToast(data.error || 'Translation failed', 'error');
     }
   } catch (err) {
-    setVoiceState('error', 'Network error');
     console.error('Translation request error:', err);
-    showToast('Network error during translation', 'error');
+    const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    if (isOffline) {
+      setVoiceState('error', 'Offline');
+      showToast("You're offline. Please check your internet connection.", 'error');
+    } else if (err.name === 'AbortError') {
+      setVoiceState('error', 'Timed out');
+      showToast('Translation request timed out in browser.', 'error');
+    } else {
+      setVoiceState('error', 'Request failed');
+      showToast(err.message || 'Unable to connect to translation server.', 'error');
+    }
   } finally {
     state.isTranslating = false;
     setTranslationLoading(false);
@@ -1340,20 +1364,51 @@ async function handleDialogueUtteranceFinished() {
         source_lang: srcLang,
         target_lang: tgtLang,
         tone: state.profile?.tone || 'casual',
-        model: state.profile?.model || 'gemini-3.8-flash',
+        model: state.profile?.model || 'gemini-2.5-flash',
         save_history: true
       })
     });
 
-    const data = await res.json();
+    if (res.status === 401) {
+      showToast('Session expired. Please sign in again.', 'error');
+      showAuthView();
+      updateLastDialogueBubble('[Session expired]');
+      return;
+    }
+
+    let data;
+    try {
+      data = await res.json();
+    } catch (_) {
+      const errorMsg = `Server error (${res.status})`;
+      updateLastDialogueBubble(`[${errorMsg}]`);
+      showToast(errorMsg, 'error');
+      return;
+    }
+
+    if (!res.ok) {
+      const errorMsg = data?.error || data?.message || `Server error (${res.status})`;
+      updateLastDialogueBubble(`[${errorMsg}]`);
+      showToast(errorMsg, 'error');
+      return;
+    }
+
     if (data.success) {
       updateLastDialogueBubble(data.translated_text);
       if (state.profile?.auto_speak) {
         speakText(data.translated_text, tgtLang);
       }
+    } else {
+      const errMsg = data.error || 'Translation failed';
+      updateLastDialogueBubble(`[${errMsg}]`);
+      showToast(errMsg, 'error');
     }
   } catch (err) {
     console.error('Dialogue translation error:', err);
+    const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    const msg = isOffline ? 'Offline' : 'Translation failed';
+    updateLastDialogueBubble(`[${msg}]`);
+    showToast(isOffline ? "You're offline. Reconnect to translate." : (err.message || 'Translation request failed'), 'error');
   }
 }
 
@@ -1721,7 +1776,7 @@ async function saveProfileChanges() {
     auto_speak: document.getElementById('profile-autospeak-toggle')?.checked ?? true,
     speech_rate: parseFloat(document.getElementById('profile-speech-rate')?.value || 1.0),
     custom_api_key: document.getElementById('profile-api-key-input')?.value?.trim() || '',
-    model: 'gemini-3.8-flash'
+    model: state.profile?.model || 'gemini-2.5-flash'
   };
 
   try {
