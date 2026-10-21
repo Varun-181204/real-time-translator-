@@ -4,8 +4,9 @@
  * Provides secure offline caching for static app shell and graceful offline fallback.
  */
 
-const CACHE_NAME = 'omnitranslate-v3';
+const CACHE_NAME = 'omnitranslate-v2';
 const STATIC_ASSETS = [
+  '/',
   '/manifest.json',
   '/static/manifest.json',
   '/static/css/style.css',
@@ -80,14 +81,6 @@ self.addEventListener('fetch', (event) => {
           { status: 503, headers: { 'Content-Type': 'application/json' } }
         );
       })
-    );
-    return;
-  }
-
-  // Navigation requests (HTML pages like '/') - ALWAYS network first so auth state is never stale
-  if (event.request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html')) {
-    event.respondWith(
-      fetch(event.request).catch(() => caches.match(event.request))
     );
     return;
   }
