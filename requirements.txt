@@ -71,3 +71,7 @@ urllib3==2.5.0
 websockets==16.1.1
 Werkzeug==3.1.9
 gunicorn==23.0.0
+
+# MongoDB Atlas
+pymongo==4.19.0
+dnspython==2.9.0

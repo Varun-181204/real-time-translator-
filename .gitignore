@@ -12,3 +12,6 @@ translator_data.db
 # Temporary audio files created while translating
 *.wav
 *.mp3
+
+database.py.sqlite-backup
+requirements.txt.utf16.bak
