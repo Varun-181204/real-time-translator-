@@ -4,7 +4,7 @@ import io
 import csv
 import json
 import tempfile
-from flask import Flask, render_template, request, jsonify, send_file, Response, session
+from flask import Flask, render_template, request, jsonify, send_file, Response, session, redirect
 from dotenv import load_dotenv
 
 # Ensure utf-8 output encoding
@@ -62,6 +62,16 @@ def index():
     user_id = get_active_user_id()
     is_authenticated = bool(user_id and get_user_by_id(user_id))
     return render_template("index.html", is_authenticated=is_authenticated)
+
+@app.route("/login")
+def login_view():
+    session.clear()
+    return render_template("index.html", is_authenticated=False)
+
+@app.route("/logout")
+def logout_view():
+    session.clear()
+    return redirect("/")
 
 @app.route("/sw.js")
 def service_worker():
