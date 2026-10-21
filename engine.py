@@ -71,15 +71,27 @@ def get_gemini_client(
         return None, str(e)
 
 def test_api_key(api_key: str) -> Dict[str, Any]:
-    """Tests if a provided Gemini API key is valid using a fast, bounded check."""
-    if not api_key or not api_key.strip():
+    """Tests if a provided Gemini or Groq API key is valid using a fast, bounded check."""
+    key_clean = (api_key or "").strip()
+    if not key_clean:
         # Check if environment key exists
-        env_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        env_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GROQ_API_KEY")
         if env_key:
-            return {"valid": True, "source": "environment", "message": "Using system GEMINI_API_KEY"}
+            return {"valid": True, "source": "environment", "message": "Using system API key"}
         return {"valid": False, "source": "none", "message": "No API key provided"}
+
+    # Handle Groq Cloud Keys (starts with gsk_)
+    if key_clean.startswith("gsk_"):
+        try:
+            import requests
+            r = requests.get("https://api.groq.com/openai/v1/models", headers={"Authorization": f"Bearer {key_clean}"}, timeout=5)
+            if r.status_code == 200:
+                return {"valid": True, "source": "custom", "message": "Groq API Key is valid and active!"}
+            return {"valid": False, "source": "custom", "message": "Invalid Groq API key. Please check your key."}
+        except Exception as e:
+            return {"valid": False, "source": "custom", "message": f"Groq validation failed: {str(e)}"}
     
-    client, err = get_gemini_client(api_key.strip(), timeout_ms=5000, max_attempts=1)
+    client, err = get_gemini_client(key_clean, timeout_ms=5000, max_attempts=1)
     if not client:
         return {"valid": False, "source": "custom", "message": f"Initialization failed: {err}"}
 
@@ -107,6 +119,79 @@ def test_api_key(api_key: str) -> Dict[str, Any]:
     except Exception as e:
         return {"valid": False, "source": "custom", "message": f"Validation failed: {format_gemini_error(str(e))}"}
 
+def translate_with_groq(
+    text: str,
+    target_lang: str,
+    source_lang: str = "auto",
+    tone: str = "natural",
+    groq_api_key: Optional[str] = None
+) -> Dict[str, Any]:
+    """Translates text using Groq Cloud API with ultra-fast inference (14,400 free req/day)."""
+    import requests
+    key = groq_api_key or os.environ.get("GROQ_API_KEY") or os.environ.get("GEMINI_API_KEY")
+    if not key or not str(key).strip().startswith("gsk_"):
+        return {"success": False, "error": "Groq API key not configured"}
+
+    tone_instruction = "Translate naturally and accurately."
+    for t in TRANSLATION_TONES:
+        if t["id"] == tone:
+            tone_instruction = t["instruction"]
+            break
+
+    prompt = f"""You are a master real-time multilingual interpreter and linguistic expert.
+Source language: {source_lang if source_lang != 'auto' else 'Detect automatically'}
+Target language: {target_lang}
+Tone/Persona instruction: {tone_instruction}
+
+Text to translate:
+\"\"\"{text}\"\"\"
+
+Provide your response in strictly valid JSON format with the following keys:
+{{
+  "translated_text": "The final translated text",
+  "detected_source_lang": "The 2-letter or name of the detected source language",
+  "pronunciation": "Phonetic romanization or pronunciation guide if target language uses non-Latin script; otherwise empty string",
+  "nuance_note": "A brief 1-sentence cultural, stylistic, or linguistic nuance note if helpful; otherwise empty string",
+  "detected_tone": "{tone}"
+}}
+"""
+    groq_models = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+    for m in groq_models:
+        try:
+            payload = {
+                "model": m,
+                "messages": [
+                    {"role": "system", "content": "You are a master multilingual translator. Return strictly valid JSON object matching the requested schema."},
+                    {"role": "user", "content": prompt}
+                ],
+                "response_format": {"type": "json_object"}
+            }
+            res = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {key.strip()}", "Content-Type": "application/json"},
+                json=payload,
+                timeout=8
+            )
+            if res.status_code == 200:
+                raw = res.json()["choices"][0]["message"]["content"].strip()
+                data = json.loads(raw)
+                model_short = m.split("/")[-1]
+                logger.info("Translation succeeded with Groq model %s", m)
+                return {
+                    "success": True,
+                    "translated_text": str(data.get("translated_text", "")).strip(),
+                    "detected_source_lang": data.get("detected_source_lang", source_lang),
+                    "pronunciation": str(data.get("pronunciation", "")).strip(),
+                    "nuance_note": str(data.get("nuance_note", "")).strip(),
+                    "engine": f"Groq ({model_short})",
+                    "tone": tone
+                }
+        except Exception as e:
+            logger.warning("Groq attempt with model %s failed: %s", m, e)
+            continue
+
+    return {"success": False, "error": "Groq translation service was unable to fulfill request."}
+
 def translate_with_gemini(
     text: str,
     target_lang: str,
@@ -115,7 +200,12 @@ def translate_with_gemini(
     model: str = "gemini-3.8-flash",
     custom_api_key: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Translates text using Gemini with intelligent context, pronunciation, and nuance."""
+    """Translates text using Gemini or Groq with intelligent context, pronunciation, and nuance."""
+    # Check if a Groq key (starts with gsk_) was provided either directly or via environment
+    active_key = (custom_api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GROQ_API_KEY") or "").strip()
+    if active_key.startswith("gsk_"):
+        return translate_with_groq(text, target_lang, source_lang, tone, groq_api_key=active_key)
+
     client, err = get_gemini_client(custom_api_key, timeout_ms=DEFAULT_GEMINI_TIMEOUT_MS, max_attempts=1)
     if not client:
         return {
@@ -269,6 +359,16 @@ Do NOT wrap in markdown formatting or backticks if possible, return raw JSON.
             if any(k in err_lower for k in ("deadline_exceeded", "timed out", "timeout")):
                 break
             continue
+
+    # If Gemini failed across all attempts and Groq key is configured, seamlessly fulfill via Groq
+    groq_backup_key = os.environ.get("GROQ_API_KEY") or (os.environ.get("GEMINI_API_KEY", "").strip() if os.environ.get("GEMINI_API_KEY", "").strip().startswith("gsk_") else None)
+    if groq_backup_key and groq_backup_key.startswith("gsk_"):
+        try:
+            groq_res = translate_with_groq(text, target_lang, source_lang, tone, groq_api_key=groq_backup_key)
+            if groq_res.get("success"):
+                return groq_res
+        except Exception:
+            pass
 
     # If Gemini failed across all attempts, return a clear, useful error without hanging
     return {
