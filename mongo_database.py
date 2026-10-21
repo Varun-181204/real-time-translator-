@@ -147,6 +147,8 @@ def get_profile(profile_id="default"):
         row["custom_api_key"] = ""
         return row
 
+    if row.get("model") in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.5-flash", "gemini-flash-latest"):
+        row["model"] = "gemini-3.8-flash"
     raw_key = (row.get("custom_api_key") or "").strip()
     row["has_custom_key"] = bool(raw_key)
     row["custom_api_key"] = "????????????????????????????????????????????????" if raw_key else ""
@@ -174,7 +176,7 @@ def save_profile(data, profile_id="default"):
         "tone": data.get("tone", defaults["tone"]),
         "auto_speak": bool(data.get("auto_speak", True)),
         "speech_rate": float(data.get("speech_rate", 1.0)),
-        "model": data.get("model", defaults["model"]),
+        "model": "gemini-3.8-flash" if data.get("model") in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.5-flash", "gemini-flash-latest") else data.get("model", defaults["model"]),
         "custom_api_key": final_key,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }

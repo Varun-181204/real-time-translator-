@@ -59,7 +59,9 @@ def get_active_user_id():
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    user_id = get_active_user_id()
+    is_authenticated = bool(user_id and get_user_by_id(user_id))
+    return render_template("index.html", is_authenticated=is_authenticated)
 
 @app.route("/sw.js")
 def service_worker():
@@ -87,9 +89,9 @@ def health_check():
     
     return jsonify({
         "status": "online",
-        "service": "Gemini 2.5 Flash",
+        "service": "Gemini 3.8 Flash",
         "gemini_connected": bool(env_key_present or has_user_key),
-        "model": "gemini-2.5-flash"
+        "model": "gemini-3.8-flash"
     })
 
 # -------------------------------------------------------------
@@ -210,7 +212,9 @@ def translate_text():
     target_lang = data.get("target_lang", "es")
     source_lang = data.get("source_lang", "auto")
     tone = data.get("tone", "natural")
-    model = data.get("model", "gemini-2.5-flash")
+    model = data.get("model", "gemini-3.8-flash")
+    if model in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", None, ""):
+        model = "gemini-3.8-flash"
     save_to_history = data.get("save_history", True)
 
     # Server securely retrieves raw custom key if user configured one

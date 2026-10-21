@@ -1,15 +1,19 @@
 import os
 import re
 import json
+import logging
 import tempfile
 from typing import Dict, Any, Optional
 from google import genai
 from google.genai import types
 from config import TRANSLATION_TONES, SUPPORTED_LANGUAGES
 
-# Explicit supported timeout: 10,000 milliseconds (10 seconds)
-DEFAULT_GEMINI_TIMEOUT_MS = int(os.environ.get("GEMINI_TIMEOUT_MS", 10000))
-FALLBACK_MODEL = "gemini-2.5-flash"
+logger = logging.getLogger("omnitranslate.engine")
+
+# Explicit supported timeout: 15,000 milliseconds (15 seconds)
+DEFAULT_GEMINI_TIMEOUT_MS = int(os.environ.get("GEMINI_TIMEOUT_MS", 15000))
+PRIMARY_MODEL = "gemini-3.8-flash"
+FALLBACK_MODEL = "gemini-3.6-flash"
 
 def format_gemini_error(error_str: str) -> str:
     """Formats Gemini API errors into helpful user-facing messages."""
@@ -18,17 +22,19 @@ def format_gemini_error(error_str: str) -> str:
     err_lower = error_str.lower()
     if "deadline_exceeded" in err_lower or "timed out" in err_lower or "timeout" in err_lower:
         return "Translation request timed out. The AI model took too long to respond. Please try again."
-    if "resource_exhausted" in err_lower or "429" in err_lower or "quota" in err_lower:
+    if any(k in err_lower for k in ("resource_exhausted", "429", "quota", "rate limit", "ratelimiterror", "too_many_requests")):
         return "Gemini API rate limit or quota exceeded. Please try again in a moment or add a custom API key in Profile."
-    if "unavailable" in err_lower or "503" in err_lower:
+    if "unavailable" in err_lower or "503" in err_lower or "experiencing high demand" in err_lower:
         return "Gemini AI model is temporarily experiencing high demand. Please try again shortly."
-    if "api_key_invalid" in err_lower or "api key not valid" in err_lower or "invalid api key" in err_lower:
+    if "api_key_invalid" in err_lower or "api key not valid" in err_lower or "invalid api key" in err_lower or "badrequesterror" in err_lower:
         return "Invalid Gemini API key. Please check your API key in Profile settings."
     if "permission_denied" in err_lower or "403" in err_lower:
         return "Access denied for Gemini API. Please check your API key permissions."
+    if "no longer available" in err_lower or "not available to new users" in err_lower:
+        return "Selected Gemini model is no longer available. OmniTranslate has been upgraded to gemini-3.8-flash."
     # Extract clean message if present in API error payload
     try:
-        match = re.search(r"'message':\s*'([^']+)'", error_str)
+        match = re.search(r"'(?:message|error)':\s*'([^']+)'", error_str)
         if match:
             return f"Gemini error: {match.group(1)}"
     except Exception:
@@ -53,6 +59,12 @@ def get_gemini_client(
             retry_options=types.HttpRetryOptions(attempts=max_attempts)
         )
         client = genai.Client(api_key=key.strip(), http_options=http_options)
+        # Disable Speakeasy internal retry loops that hang on 429/503 errors
+        if hasattr(client, "interactions") and client.interactions:
+            try:
+                client.interactions.sdk_configuration.retry_config = None
+            except Exception:
+                pass
         return client, None
     except Exception as e:
         return None, str(e)
@@ -71,15 +83,25 @@ def test_api_key(api_key: str) -> Dict[str, Any]:
         return {"valid": False, "source": "custom", "message": f"Initialization failed: {err}"}
 
     try:
-        resp = client.models.generate_content(
-            model=FALLBACK_MODEL,
-            contents="Say 'OK'",
-            config=types.GenerateContentConfig(
-                http_options=types.HttpOptions(timeout=5000, retry_options=types.HttpRetryOptions(attempts=1))
+        # Use Interactions API when available, otherwise generate_content
+        if hasattr(client, "interactions") and client.interactions:
+            inter = client.interactions.create(
+                model=PRIMARY_MODEL,
+                input="Say 'OK'",
+                timeout=5.0
             )
-        )
-        if resp and resp.text:
-            return {"valid": True, "source": "custom", "message": "API Key is valid and active!"}
+            if inter and getattr(inter, "output_text", None):
+                return {"valid": True, "source": "custom", "message": "API Key is valid and active!"}
+        else:
+            resp = client.models.generate_content(
+                model=PRIMARY_MODEL,
+                contents="Say 'OK'",
+                config=types.GenerateContentConfig(
+                    http_options=types.HttpOptions(timeout=5000, retry_options=types.HttpRetryOptions(attempts=1))
+                )
+            )
+            if resp and resp.text:
+                return {"valid": True, "source": "custom", "message": "API Key is valid and active!"}
         return {"valid": False, "source": "custom", "message": "Received empty response from API"}
     except Exception as e:
         return {"valid": False, "source": "custom", "message": f"Validation failed: {format_gemini_error(str(e))}"}
@@ -89,7 +111,7 @@ def translate_with_gemini(
     target_lang: str,
     source_lang: str = "auto",
     tone: str = "natural",
-    model: str = "gemini-2.5-flash",
+    model: str = "gemini-3.8-flash",
     custom_api_key: Optional[str] = None
 ) -> Dict[str, Any]:
     """Translates text using Gemini with intelligent context, pronunciation, and nuance."""
@@ -105,6 +127,10 @@ def translate_with_gemini(
             "tone": tone,
             "error": "Gemini API key is not configured. Please add an API key in Profile settings."
         }
+
+    # Automatically upgrade any deprecated/stale model IDs
+    if model in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.5-flash", "gemini-flash-latest", None, ""):
+        model = PRIMARY_MODEL
 
     # Find tone instruction
     tone_instruction = "Translate naturally and accurately."
@@ -139,24 +165,51 @@ Do NOT wrap in markdown formatting or backticks if possible, return raw JSON.
     if FALLBACK_MODEL not in models_to_try:
         models_to_try.append(FALLBACK_MODEL)
 
-    http_options = types.HttpOptions(
-        timeout=DEFAULT_GEMINI_TIMEOUT_MS,
-        retry_options=types.HttpRetryOptions(attempts=1)
-    )
-    gen_config = types.GenerateContentConfig(
-        http_options=http_options,
-        response_mime_type="application/json"
-    )
+    timeout_sec = float(DEFAULT_GEMINI_TIMEOUT_MS) / 1000.0
 
     last_error = None
     for m in models_to_try:
         try:
-            response = client.models.generate_content(
-                model=m,
-                contents=prompt,
-                config=gen_config
-            )
-            raw = response.text.strip() if response and response.text else ""
+            raw = ""
+            # Migrate to Interactions API if available
+            if hasattr(client, "interactions") and client.interactions:
+                interaction = client.interactions.create(
+                    model=m,
+                    input=prompt,
+                    response_format={
+                        "type": "text",
+                        "mime_type": "application/json",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "translated_text": {"type": "string"},
+                                "detected_source_lang": {"type": "string"},
+                                "pronunciation": {"type": "string"},
+                                "nuance_note": {"type": "string"},
+                                "detected_tone": {"type": "string"}
+                            },
+                            "required": ["translated_text"]
+                        }
+                    },
+                    timeout=timeout_sec
+                )
+                raw = (getattr(interaction, "output_text", "") or "").strip()
+            else:
+                gen_config = types.GenerateContentConfig(
+                    http_options=types.HttpOptions(
+                        timeout=DEFAULT_GEMINI_TIMEOUT_MS,
+                        retry_options=types.HttpRetryOptions(attempts=1)
+                    ),
+                    response_mime_type="application/json"
+                )
+                response = client.models.generate_content(
+                    model=m,
+                    contents=prompt,
+                    config=gen_config
+                )
+                raw = response.text.strip() if response and response.text else ""
+
+            # Clean markdown code fences if present
             if raw.startswith("```json"):
                 raw = raw[7:]
             elif raw.startswith("```"):
@@ -165,7 +218,15 @@ Do NOT wrap in markdown formatting or backticks if possible, return raw JSON.
                 raw = raw[:-3]
             raw = raw.strip()
 
+            # Ensure valid JSON object extraction
+            if not (raw.startswith("{") and raw.endswith("}")):
+                start_idx = raw.find("{")
+                end_idx = raw.rfind("}")
+                if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                    raw = raw[start_idx:end_idx + 1]
+
             data = json.loads(raw)
+            logger.info("Translation succeeded with model: %s (engine: Gemini (%s), tone: %s)", m, m, tone)
             return {
                 "success": True,
                 "translated_text": data.get("translated_text", "").strip(),
@@ -177,6 +238,11 @@ Do NOT wrap in markdown formatting or backticks if possible, return raw JSON.
             }
         except Exception as e:
             last_error = str(e)
+            logger.warning("Translation attempt with model %s failed: %s", m, format_gemini_error(str(e)))
+            err_lower = str(e).lower()
+            # If the request timed out, do not hang the user with subsequent attempts
+            if any(k in err_lower for k in ("deadline_exceeded", "timed out", "timeout")):
+                break
             continue
 
     # If Gemini failed across all attempts, return a clear, useful error without hanging

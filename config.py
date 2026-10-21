@@ -8,8 +8,8 @@ DB_PATH = os.environ.get(
 
 # Supported models
 AVAILABLE_MODELS = [
-    {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash (Fast, Stable & Recommended)", "default": True},
-    {"id": "gemini-3.8-flash", "name": "Gemini 3.8 Flash (High Capacity)", "default": False},
+    {"id": "gemini-3.8-flash", "name": "Gemini 3.8 Flash (Fast & Smart - Recommended)", "default": True},
+    {"id": "gemini-3.6-flash", "name": "Gemini 3.6 Flash (Stable Fallback)", "default": False},
 ]
 
 # Translation Tones / Personas
@@ -105,6 +105,6 @@ DEFAULT_PROFILE = {
     "tone": "natural",
     "auto_speak": True,
     "speech_rate": 1.0,
-    "model": "gemini-2.5-flash",
+    "model": "gemini-3.8-flash",
     "custom_api_key": "",
 }

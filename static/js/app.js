@@ -536,6 +536,18 @@ function populateTonePills() {
       profTone.appendChild(opt);
     });
   }
+
+  // Profile modal model select
+  const profModel = document.getElementById('profile-model-select');
+  if (profModel && state.config?.models) {
+    profModel.innerHTML = '';
+    state.config.models.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.name;
+      profModel.appendChild(opt);
+    });
+  }
 }
 
 function selectTone(toneId) {
@@ -690,7 +702,7 @@ async function triggerTranslation(customText = null, overrideTarget = null, over
   const targetLang = overrideTarget || document.getElementById('target-lang-select').value;
   const sourceLang = overrideSource || document.getElementById('source-lang-select').value;
   const tone = state.activeTone || 'natural';
-  const model = state.profile?.model || 'gemini-2.5-flash';
+  const model = state.profile?.model || 'gemini-3.8-flash';
 
   state.isTranslating = true;
   setTranslationLoading(true);
@@ -1364,7 +1376,7 @@ async function handleDialogueUtteranceFinished() {
         source_lang: srcLang,
         target_lang: tgtLang,
         tone: state.profile?.tone || 'casual',
-        model: state.profile?.model || 'gemini-2.5-flash',
+        model: state.profile?.model || 'gemini-3.8-flash',
         save_history: true
       })
     });
@@ -1687,6 +1699,7 @@ function populateProfileModalFields() {
   const nativeSelect = document.getElementById('profile-native-lang');
   const targetSelect = document.getElementById('profile-target-lang');
   const toneSelect = document.getElementById('profile-tone-select');
+  const modelSelect = document.getElementById('profile-model-select');
   const keyStatus = document.getElementById('profile-key-status');
 
   if (nameInput) nameInput.value = state.user?.name || state.profile?.name || '';
@@ -1698,6 +1711,7 @@ function populateProfileModalFields() {
   if (nativeSelect) nativeSelect.value = state.profile?.native_language || 'en';
   if (targetSelect) targetSelect.value = state.profile?.default_target || 'es';
   if (toneSelect) toneSelect.value = state.profile?.tone || 'natural';
+  if (modelSelect && state.profile?.model) modelSelect.value = state.profile.model;
 
   const avatarKey = state.profile?.avatar || state.user?.avatar || 'astronaut';
   selectAvatar(avatarKey, AVATAR_MAP[avatarKey] || '🚀');
@@ -1776,7 +1790,7 @@ async function saveProfileChanges() {
     auto_speak: document.getElementById('profile-autospeak-toggle')?.checked ?? true,
     speech_rate: parseFloat(document.getElementById('profile-speech-rate')?.value || 1.0),
     custom_api_key: document.getElementById('profile-api-key-input')?.value?.trim() || '',
-    model: state.profile?.model || 'gemini-2.5-flash'
+    model: document.getElementById('profile-model-select')?.value || state.profile?.model || 'gemini-3.8-flash'
   };
 
   try {

@@ -215,6 +215,8 @@ else:
         conn.close()
         if row:
             d = dict(row)
+            if d.get("model") in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.5-flash", "gemini-flash-latest"):
+                d["model"] = "gemini-3.8-flash"
             raw_key = (d.get("custom_api_key") or "").strip()
             d["has_custom_key"] = bool(raw_key)
             # Never expose raw key to the client
@@ -262,7 +264,7 @@ else:
             data.get("tone", DEFAULT_PROFILE["tone"]),
             1 if data.get("auto_speak", True) else 0,
             float(data.get("speech_rate", 1.0)),
-            data.get("model", DEFAULT_PROFILE["model"]),
+            "gemini-3.8-flash" if data.get("model") in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.5-flash", "gemini-flash-latest") else data.get("model", DEFAULT_PROFILE["model"]),
             final_key,
         ))
     
