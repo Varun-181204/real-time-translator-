@@ -14,6 +14,7 @@ logger = logging.getLogger("omnitranslate.engine")
 DEFAULT_GEMINI_TIMEOUT_MS = int(os.environ.get("GEMINI_TIMEOUT_MS", 15000))
 PRIMARY_MODEL = "gemini-3.8-flash"
 FALLBACK_MODEL = "gemini-3.6-flash"
+TERTIARY_MODEL = "gemini-2.5-flash"
 
 def format_gemini_error(error_str: str) -> str:
     """Formats Gemini API errors into helpful user-facing messages."""
@@ -129,7 +130,7 @@ def translate_with_gemini(
         }
 
     # Automatically upgrade any deprecated/stale model IDs
-    if model in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.5-flash", "gemini-flash-latest", None, ""):
+    if model in ("gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.5-flash", "gemini-flash-latest", None, ""):
         model = PRIMARY_MODEL
 
     # Find tone instruction
@@ -160,10 +161,12 @@ Provide your response in strictly valid JSON format with the following keys:
 Do NOT wrap in markdown formatting or backticks if possible, return raw JSON.
 """
 
-    # Primary model first, followed by sensible fallback if different
+    # Primary model first, followed by sensible fallbacks
     models_to_try = [model]
     if FALLBACK_MODEL not in models_to_try:
         models_to_try.append(FALLBACK_MODEL)
+    if TERTIARY_MODEL not in models_to_try:
+        models_to_try.append(TERTIARY_MODEL)
 
     timeout_sec = float(DEFAULT_GEMINI_TIMEOUT_MS) / 1000.0
 
@@ -219,20 +222,42 @@ Do NOT wrap in markdown formatting or backticks if possible, return raw JSON.
             raw = raw.strip()
 
             # Ensure valid JSON object extraction
-            if not (raw.startswith("{") and raw.endswith("}")):
+            data = None
+            if raw.startswith("{") and raw.endswith("}"):
+                try:
+                    data = json.loads(raw)
+                except Exception:
+                    data = None
+
+            if data is None:
                 start_idx = raw.find("{")
                 end_idx = raw.rfind("}")
                 if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                    raw = raw[start_idx:end_idx + 1]
+                    try:
+                        data = json.loads(raw[start_idx:end_idx + 1])
+                    except Exception:
+                        data = None
 
-            data = json.loads(raw)
+            if data is None and raw:
+                # If model returned direct translated text rather than JSON
+                data = {
+                    "translated_text": raw,
+                    "detected_source_lang": source_lang,
+                    "pronunciation": "",
+                    "nuance_note": "",
+                    "detected_tone": tone
+                }
+
+            if not data or not data.get("translated_text"):
+                raise ValueError("Model returned empty translation")
+
             logger.info("Translation succeeded with model: %s (engine: Gemini (%s), tone: %s)", m, m, tone)
             return {
                 "success": True,
-                "translated_text": data.get("translated_text", "").strip(),
+                "translated_text": str(data.get("translated_text", "")).strip(),
                 "detected_source_lang": data.get("detected_source_lang", source_lang),
-                "pronunciation": data.get("pronunciation", "").strip(),
-                "nuance_note": data.get("nuance_note", "").strip(),
+                "pronunciation": str(data.get("pronunciation", "")).strip(),
+                "nuance_note": str(data.get("nuance_note", "")).strip(),
                 "engine": f"Gemini ({m})",
                 "tone": tone
             }

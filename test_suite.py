@@ -185,7 +185,7 @@ def test_full_pipeline():
     else:
         assert trans_data.get("success") is True, f"Translation failed: {trans_data}"
         assert len(trans_data["translated_text"]) > 0
-        assert trans_data.get("engine") in ("Gemini (gemini-3.8-flash)", "Gemini (gemini-3.6-flash)")
+        assert trans_data.get("engine") in ("Gemini (gemini-3.8-flash)", "Gemini (gemini-3.6-flash)", "Gemini (gemini-2.5-flash)")
         print(f"[PASS] 12. Live translation verified. Active engine: '{trans_data.get('engine')}' - Output: '{trans_data['translated_text']}'")
 
     # 13. History Verification
